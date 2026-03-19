@@ -1,0 +1,46 @@
+# 核心依赖
+pandas>=2.0.0
+numpy>=1.24.0
+python-dotenv>=1.0.0
+
+# 数据获取
+tushare>=1.2.0
+baostock>=0.8.0
+
+# 技术分析
+pandas-ta>=0.3.0
+
+# 回测框架
+backtrader>=1.9.0
+
+# 机器学习
+scikit-learn>=1.2.0
+xgboost>=1.7.0
+
+# 任务调度
+apscheduler>=3.10.0
+
+# Web 框架 (可选)
+fastapi>=0.100.0
+uvicorn>=0.22.0
+pydantic>=2.0.0
+
+# 测试
+pytest>=7.3.0
+pytest-cov>=4.1.0
+
+# 开发工具
+black>=23.0.0
+flake8>=6.0.0
+mypy>=1.0.0
+
+# 数据处理
+pyarrow>=12.0.0
+
+# 图表 (可选，用于 Jupyter)
+matplotlib>=3.7.0
+seaborn>=0.12.0
+plotly>=5.14.0
+
+# 通知
+requests>=2.31.0
