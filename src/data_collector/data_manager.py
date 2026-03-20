@@ -383,6 +383,63 @@ class DataManager:
 
         return merged_df
 
+    def filter_stock_pool_by_fundamentals(
+        self,
+        stock_list: Optional[List[str]] = None,
+        max_pe: float = 50,
+        min_roe: float = 0.05,
+        min_revenue_growth: float = 0.0
+    ) -> List[str]:
+        """
+        基本面过滤股票池
+
+        Args:
+            stock_list: 待过滤的股票列表，None 表示使用扩展股票池
+            max_pe: 最大市盈率
+            min_roe: 最小 ROE
+            min_revenue_growth: 最小营收增长率
+
+        Returns:
+            符合基本面条件的股票列表
+        """
+        if stock_list is None:
+            stock_list = settings.EXTENDED_STOCK_POOL
+
+        return self.ts_client.filter_stocks_by_fundamentals(
+            stock_list=stock_list,
+            max_pe=max_pe,
+            min_roe=min_roe,
+            min_revenue_growth=min_revenue_growth
+        )
+
+    def get_hs300_filtered(
+        self,
+        max_pe: float = 50,
+        min_roe: float = 0.05,
+        min_revenue_growth: float = 0.0
+    ) -> List[str]:
+        """
+        获取沪深 300 成分股并进行基本面过滤
+
+        Args:
+            max_pe: 最大市盈率
+            min_roe: 最小 ROE
+            min_revenue_growth: 最小营收增长率
+
+        Returns:
+            过滤后的沪深 300 成分股列表
+        """
+        hs300_stocks = self.ts_client.get_hs300_stocks()
+        if not hs300_stocks:
+            return settings.EXTENDED_STOCK_POOL
+
+        return self.filter_stock_pool_by_fundamentals(
+            stock_list=hs300_stocks,
+            max_pe=max_pe,
+            min_roe=min_roe,
+            min_revenue_growth=min_revenue_growth
+        )
+
 
 # 创建数据管理器实例
 data_manager = DataManager()

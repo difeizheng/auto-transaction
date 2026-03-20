@@ -388,6 +388,85 @@ class TushareClient:
 
         return combined_df if all_stocks else pd.DataFrame()
 
+    def filter_stocks_by_fundamentals(
+        self,
+        stock_list: List[str],
+        max_pe: float = 50,
+        min_roe: float = 0.05,
+        min_revenue_growth: float = 0.0
+    ) -> List[str]:
+        """
+        基本面过滤股票池
+
+        Args:
+            stock_list: 待过滤的股票列表
+            max_pe: 最大市盈率
+            min_roe: 最小 ROE
+            min_revenue_growth: 最小营收增长率
+
+        Returns:
+            符合基本面条件的股票列表
+        """
+        filtered_stocks = []
+
+        for ts_code in stock_list:
+            try:
+                # 获取财务指标
+                fina_df = self.pro.fina_indicator(
+                    ts_code=ts_code,
+                    fields=['ts_code', 'ann_date', 'pe', 'roe', 'total_revenue_yoy']
+                )
+
+                if fina_df.empty:
+                    continue
+
+                # 获取最新财务数据
+                latest = fina_df.sort_values('ann_date', ascending=False).iloc[0]
+
+                pe = latest.get('pe', None)
+                roe = latest.get('roe', None)
+                revenue_growth = latest.get('total_revenue_yoy', None)
+
+                # 过滤条件
+                if pe is not None and pe > max_pe:
+                    continue
+                if roe is not None and roe < min_roe * 100:  # Tushare ROE 为百分比
+                    continue
+                if revenue_growth is not None and revenue_growth < min_revenue_growth * 100:
+                    continue
+
+                filtered_stocks.append(ts_code)
+                data_logger.debug(f"{ts_code} 通过基本面过滤")
+
+            except Exception as e:
+                data_logger.warning(f"{ts_code} 基本面数据获取失败：{e}")
+                continue
+
+            # 频率限制
+            time.sleep(self._request_interval)
+
+        data_logger.info(f"基本面过滤完成：{len(stock_list)} -> {len(filtered_stocks)}")
+        return filtered_stocks
+
+    def get_hs300_stocks(self) -> List[str]:
+        """
+        获取沪深 300 成分股
+
+        Returns:
+            沪深 300 成分股列表
+        """
+        try:
+            # 获取沪深 300 成分股
+            df = self.pro.index_member(ts_code='000300.SH', is_hold='1')
+            if not df.empty:
+                stocks = df['con_code'].tolist()
+                data_logger.info(f"获取沪深 300 成分股成功，共 {len(stocks)} 只")
+                return stocks
+        except Exception as e:
+            data_logger.error(f"获取沪深 300 成分股失败：{e}")
+
+        return []
+
 
 # 创建客户端实例
 ts_client = TushareClient()

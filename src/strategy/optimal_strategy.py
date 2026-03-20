@@ -48,10 +48,11 @@ class OptimalStrategyParams:
     bb_num_std: float = 2.0
 
     # 动态止损止盈
-    base_stop_loss: float = 0.08      # 基础止损 8%
+    base_stop_loss: float = 0.07      # 基础止损 7%
     base_take_profit: float = 0.20    # 基础止盈 20%
     atr_multiplier_sl: float = 2.0    # ATR 止损倍数
     atr_multiplier_tp: float = 3.0    # ATR 止盈倍数
+    trailing_stop_trigger: float = 0.12  # 移动止损触发点 12%
 
     # 仓位管理
     base_position_ratio: float = 0.25  # 基础仓位 25%
@@ -59,7 +60,10 @@ class OptimalStrategyParams:
     min_position_ratio: float = 0.10   # 最小仓位 10%
 
     # 市场状态判断
-    trend_threshold: float = 0.05      # 趋势判断阈值 5%
+    trend_threshold: float = 0.03      # 趋势判断阈值 3%
+
+    # 信号阈值（动态可配置）
+    signal_threshold: float = 4.0      # 信号触发阈值 4.0/7
 
 
 class OptimalStrategy(BaseStrategy):
@@ -142,21 +146,53 @@ class OptimalStrategy(BaseStrategy):
 
     def determine_market_state(self, df: pd.DataFrame) -> MarketState:
         """
-        判断市场状态
+        判断市场状态 (改进版)
 
-        基于价格与长期均线的位置关系
+        基于双均线系统 + 时间过滤 + 成交量确认
+        - 双均线：短期均线与长期均线的关系
+        - 时间过滤：连续 3 日确认
+        - 成交量：上涨放量确认
         """
-        if len(df) < self.params.ma_trend:
+        ma_long_period = self.params.ma_trend
+
+        if len(df) < ma_long_period + 2:
             return MarketState.SIDEWAYS
 
-        ma_trend = df['close'].rolling(self.params.ma_trend).mean().iloc[-1]
-        current_price = df['close'].iloc[-1]
+        close = df['close']
+        vol = df['vol']
 
-        ratio = (current_price - ma_trend) / ma_trend
+        # 计算均线
+        ma_short = close.rolling(self.params.ma_short).mean()
+        ma_long = close.rolling(ma_long_period).mean()
 
-        if ratio > self.params.trend_threshold:
+        current_price = close.iloc[-1]
+        current_vol = vol.iloc[-1] if len(vol) > 0 else 0
+        vol_ma = vol.rolling(self.params.volume_ma_period).mean().iloc[-1] if len(vol) >= self.params.volume_ma_period else 0
+
+        # 检查连续 3 日的均线关系
+        consecutive_bull = 0
+        consecutive_bear = 0
+
+        for i in range(3):
+            idx = -1 - i
+            if idx >= -len(df):
+                short_val = ma_short.iloc[idx]
+                long_val = ma_long.iloc[idx]
+
+                # 短期 > 长期 → 牛市信号
+                if short_val > long_val:
+                    consecutive_bull += 1
+                # 短期 < 长期 → 熊市信号
+                elif short_val < long_val:
+                    consecutive_bear += 1
+
+        # 成交量确认 (放量上涨才是真牛市)
+        volume_confirmed = current_vol > vol_ma * 1.1 if vol_ma > 0 else True
+
+        # 综合判断
+        if consecutive_bull >= 3 and volume_confirmed:
             return MarketState.BULL
-        elif ratio < -self.params.trend_threshold:
+        elif consecutive_bear >= 3:
             return MarketState.BEAR
         else:
             return MarketState.SIDEWAYS
@@ -269,8 +305,8 @@ class OptimalStrategy(BaseStrategy):
         if profit_ratio >= dynamic_tp:
             return ('sell', f'止盈 ({profit_ratio:.1%}, TP={dynamic_tp:.1%})')
 
-        # 3. 移动止损检查 (当盈利超过 10% 后激活)
-        if highest_price >= entry_price * 1.10:
+        # 3. 移动止损检查 (当盈利超过 8% 后激活)
+        if highest_price >= entry_price * (1 + self.params.trailing_stop_trigger):
             drawdown = (highest_price - current_price) / highest_price
             trailing_stop = dynamic_sl * 0.5  # 移动止损更紧
             if drawdown >= trailing_stop:
@@ -283,35 +319,65 @@ class OptimalStrategy(BaseStrategy):
         golden_cross: bool,
         macd_bullish: bool,
         rsi_ok: bool,
+        rsi_oversold: bool,
         bb_signal: str,
         volume_ok: bool,
         trend_ok: bool
     ) -> Tuple[bool, float]:
         """
-        综合评分系统
+        综合评分系统 (加权版)
+
+        权重分配:
+        - 均线金叉：1.5 分 (趋势确认最重要)
+        - MACD 多头：1.0 分
+        - RSI 健康：0.5 分
+        - RSI 超卖：额外 +0.5 分
+        - 布林带下轨：1.0 分 (超卖反弹)
+        - 成交量放大：1.0 分 (资金确认)
+        - 趋势向上：1.0 分
 
         Returns:
             (是否买入，信号强度)
         """
         score = 0.0
-        max_score = 6.0
+        max_score = 7.0  # 最大可能得分
 
-        # 各项得分
+        # 1. 均线金叉 (权重 1.5 - 最重要)
         if golden_cross:
-            score += 1.0
+            score += 1.5
+
+        # 2. MACD 多头 (权重 1.0)
         if macd_bullish:
             score += 1.0
+
+        # 3. RSI 健康 (权重 0.5)
         if rsi_ok:
+            score += 0.5
+
+        # 4. RSI 超卖额外加分 (权重 0.5) - 与 RSI 健康互斥，取较高者
+        if rsi_oversold:
+            score += 0.5
+
+        # 5. 布林带下轨 (权重 1.0 - 超卖反弹信号)
+        if bb_signal == 'lower':
             score += 1.0
-        if bb_signal == 'lower':  # 触及下轨
-            score += 1.0
+
+        # 6. 成交量放大 (权重 1.0 - 资金确认)
         if volume_ok:
             score += 1.0
+
+        # 7. 趋势向上 (权重 1.0)
         if trend_ok:
             score += 1.0
 
-        # 需要至少 4/6 的条件才买入
-        buy_signal = score >= 4.0
+        # 7. 趋势向上 (权重 1.0)
+        if trend_ok:
+            score += 1.0
+
+        # 使用动态阈值 (默认 4.0 分)
+        # 注：3.5 分阈值下盈亏比仅 0.83，提高至 4.0 分以提高信号质量
+        # 增加趋势过滤：趋势向下时不买入 (即使评分高)
+        buy_signal = score >= self.params.signal_threshold and trend_ok
         signal_strength = min(1.0, score / max_score)
 
         return buy_signal, signal_strength
@@ -407,24 +473,27 @@ class OptimalStrategy(BaseStrategy):
             # 2. MACD 多头
             macd_bullish = dif > dea and macd > 0
 
-            # 3. RSI 健康
+            # 3. RSI 健康 (不在超买/超卖区)
             rsi_ok = (self.params.rsi_oversold < current_rsi < self.params.rsi_overbought)
 
-            # 4. 布林带信号
+            # 4. RSI 超卖 (额外加分项)
+            rsi_oversold = current_rsi < self.params.rsi_oversold
+
+            # 5. 布林带信号
             bb_signal = 'lower' if current_price <= bb_lower * 1.01 else \
                        ('upper' if current_price >= bb_upper * 0.99 else 'middle')
 
-            # 5. 成交量放大
+            # 6. 成交量放大
             current_vol = bar.get('vol', 0)
             current_vol_ma = vol_ma.iloc[-1] if len(vol_ma) > 0 else 0
             volume_ok = current_vol > current_vol_ma * self.params.volume_ratio_threshold if current_vol_ma > 0 else True
 
-            # 6. 趋势判断
+            # 7. 趋势判断
             trend_ok = current_price > ma_trend.iloc[-1] * (1 + self.params.trend_threshold)
 
             # 综合评分
             buy_signal, signal_strength = self.calculate_signal_score(
-                golden_cross, macd_bullish, rsi_ok, bb_signal, volume_ok, trend_ok
+                golden_cross, macd_bullish, rsi_ok, rsi_oversold, bb_signal, volume_ok, trend_ok
             )
 
             # === 生成买入信号 ===
@@ -466,9 +535,10 @@ class OptimalStrategy(BaseStrategy):
 
 # 创建策略实例的工厂函数
 def create_optimal_strategy(
-    stop_loss: float = 0.06,
-    take_profit: float = 0.18,
-    position_ratio: float = 0.20,
+    stop_loss: float = 0.07,      # 更新为新参数 7%
+    take_profit: float = 0.20,    # 更新为新参数 20%
+    position_ratio: float = 0.25,
+    signal_threshold: float = 4.0,  # 信号触发阈值
     aggressive: bool = False
 ) -> OptimalStrategy:
     """
@@ -478,18 +548,21 @@ def create_optimal_strategy(
         stop_loss: 止损比例
         take_profit: 止盈比例
         position_ratio: 基础仓位比例
+        signal_threshold: 信号触发阈值
         aggressive: 是否激进模式
 
     Returns:
         OptimalStrategy 实例
     """
     if aggressive:
-        # 激进模式：更高仓位，更宽止损
+        # 激进模式：更高仓位，使用默认止损止盈
         params = OptimalStrategyParams(
-            base_stop_loss=max(stop_loss, 0.08),
-            base_take_profit=max(take_profit, 0.20),
-            base_position_ratio=min(position_ratio * 1.5, 0.30),
-            max_position_ratio=0.40
+            base_stop_loss=stop_loss,
+            base_take_profit=take_profit,
+            base_position_ratio=min(position_ratio * 1.2, 0.35),
+            max_position_ratio=0.40,
+            trailing_stop_trigger=0.12,  # 12% 触发移动止损
+            signal_threshold=signal_threshold
         )
         return OptimalStrategy(name="optimal_aggressive", params=params)
     else:
@@ -498,6 +571,8 @@ def create_optimal_strategy(
             base_stop_loss=stop_loss,
             base_take_profit=take_profit,
             base_position_ratio=position_ratio,
-            max_position_ratio=0.30
+            max_position_ratio=0.30,
+            trailing_stop_trigger=0.12,
+            signal_threshold=signal_threshold
         )
         return OptimalStrategy(name="optimal_conservative", params=params)

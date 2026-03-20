@@ -34,7 +34,9 @@ def update_data(days: int = 30, stocks: list = None):
     print(f"更新最近 {days} 天的行情数据...")
 
     if stocks is None:
-        stocks = ['000001.SZ', '000002.SZ', '000063.SZ', '000014.SZ', '000016.SZ']
+        # 使用扩展股票池
+        from config.settings import EXTENDED_STOCK_POOL
+        stocks = EXTENDED_STOCK_POOL
 
     from datetime import datetime, timedelta
     end_date = datetime.now()
@@ -56,12 +58,46 @@ def update_data(days: int = 30, stocks: list = None):
 
 def run_backtest(strategy: str = "optimal", stocks: list = None,
                  start_date: str = '20250301', end_date: str = '20260319',
-                 initial_capital: float = 1000000):
-    """运行回测"""
+                 initial_capital: float = 1000000,
+                 use_extended_pool: bool = True,
+                 filter_fundamentals: bool = True,
+                 stop_loss: float = None,
+                 take_profit: float = None,
+                 signal_threshold: float = None):
+    """运行回测
+
+    Args:
+        strategy: 策略类型
+        stocks: 自定义股票池
+        start_date: 开始日期
+        end_date: 结束日期
+        initial_capital: 初始资金
+        use_extended_pool: 是否使用扩展股票池
+        filter_fundamentals: 是否进行基本面过滤
+        stop_loss: 止损比例（可选，覆盖默认值）
+        take_profit: 止盈比例（可选，覆盖默认值）
+        signal_threshold: 信号阈值（可选，覆盖默认值）
+    """
     print(f"开始回测 - 策略：{strategy}")
 
+    # 确定股票池
     if stocks is None:
-        stocks = ['000001.SZ', '000002.SZ', '000063.SZ', '000014.SZ', '000016.SZ']
+        if use_extended_pool:
+            from config.settings import EXTENDED_STOCK_POOL, FUNDAMENTAL_FILTERS
+            if filter_fundamentals:
+                print('正在基本面过滤股票池...')
+                stocks = data_manager.filter_stock_pool_by_fundamentals(
+                    stock_list=EXTENDED_STOCK_POOL,
+                    max_pe=FUNDAMENTAL_FILTERS['max_pe'],
+                    min_roe=FUNDAMENTAL_FILTERS['min_roe'],
+                    min_revenue_growth=FUNDAMENTAL_FILTERS['min_revenue_growth']
+                )
+                print(f'基本面过滤后股票数量：{len(stocks)}')
+            else:
+                stocks = EXTENDED_STOCK_POOL
+        else:
+            # 默认股票池
+            stocks = ['000001.SZ', '000002.SZ', '000063.SZ', '000014.SZ', '000016.SZ']
 
     # 加载数据
     print('加载数据...')
@@ -76,7 +112,15 @@ def run_backtest(strategy: str = "optimal", stocks: list = None,
     # 创建策略
     print('创建策略...')
     if strategy.lower() == 'optimal':
-        strat = create_optimal_strategy(aggressive=True)
+        # 支持动态传递止损止盈参数
+        strat = create_optimal_strategy(
+            stop_loss=stop_loss,
+            take_profit=take_profit,
+            aggressive=True
+        )
+        # 如果指定了信号阈值，需要修改策略参数
+        if signal_threshold is not None:
+            strat.params.signal_threshold = signal_threshold
     elif strategy.lower() == 'enhanced':
         strat = EnhancedMaCrossoverStrategy()
     elif strategy.lower() == 'ma':
@@ -105,7 +149,9 @@ def run_paper_trading(strategy: str = 'optimal', stocks: list = None, initial_ca
     print(f"启动模拟交易 - 策略：{strategy}, 初始资金：{initial_capital:,.0f}")
 
     if stocks is None:
-        stocks = ['000001.SZ', '000002.SZ', '000063.SZ', '000014.SZ', '000016.SZ']
+        # 使用扩展股票池
+        from config.settings import EXTENDED_STOCK_POOL
+        stocks = EXTENDED_STOCK_POOL
 
     # 创建策略
     if strategy.lower() == 'optimal':
@@ -170,6 +216,13 @@ def main():
     parser.add_argument('--capital', type=float, default=1000000, help='回测初始资金')
     parser.add_argument('--paper-capital', type=float, default=100000, help='模拟交易初始资金')
     parser.add_argument('--stocks', type=str, nargs='+', default=None, help='股票池')
+    parser.add_argument('--use-extended-pool', action='store_true', default=True, help='使用扩展股票池')
+    parser.add_argument('--no-fundamental-filter', action='store_true', help='不进行基本面过滤')
+    parser.add_argument('--pool-size', type=int, default=30, help='股票池目标数量')
+    # 参数敏感性测试支持
+    parser.add_argument('--stop-loss', type=float, default=None, help='止损比例 (可选，覆盖默认值)')
+    parser.add_argument('--take-profit', type=float, default=None, help='止盈比例 (可选，覆盖默认值)')
+    parser.add_argument('--signal-threshold', type=float, default=None, help='信号阈值 (可选，覆盖默认值)')
 
     args = parser.parse_args()
 
@@ -183,7 +236,12 @@ def main():
             stocks=args.stocks,
             start_date=args.start_date or '20250301',
             end_date=args.end_date or '20260319',
-            initial_capital=args.capital
+            initial_capital=args.capital,
+            use_extended_pool=args.use_extended_pool,
+            filter_fundamentals=not args.no_fundamental_filter,
+            stop_loss=args.stop_loss,
+            take_profit=args.take_profit,
+            signal_threshold=args.signal_threshold
         )
     elif args.command == 'paper':
         run_paper_trading(strategy=args.strategy, stocks=args.stocks, initial_capital=args.paper_capital)
