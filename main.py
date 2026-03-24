@@ -18,6 +18,7 @@ from src.trader.scheduler import TradingBot, create_trading_bot
 from src.strategy.technical import TechnicalStrategy, MACDStrategy, MaCrossoverStrategy
 from src.strategy.optimal_strategy import create_optimal_strategy
 from src.strategy.enhanced_ma import EnhancedMaCrossoverStrategy
+from src.strategy.trend_follow import create_trend_follow_strategy
 from src.backtest.engine import BacktestEngine
 from src.backtest.performance import PerformanceAnalyzer
 
@@ -56,6 +57,51 @@ def update_data(days: int = 30, stocks: list = None):
     print("数据更新完成")
 
 
+def update_data_long_term(days: int = 1825):
+    """获取长期历史数据用于跨周期验证"""
+    print(f"获取最近 {days} 天 ({days//365} 年) 的历史数据...")
+
+    # 使用扩展股票池
+    from config.settings import EXTENDED_STOCK_POOL, FUNDAMENTAL_FILTERS
+    stocks = EXTENDED_STOCK_POOL
+
+    # 基本面过滤
+    print("正在基本面过滤股票池...")
+    filtered_stocks = data_manager.filter_stock_pool_by_fundamentals(
+        stock_list=stocks,
+        max_pe=FUNDAMENTAL_FILTERS['max_pe'],
+        min_roe=FUNDAMENTAL_FILTERS['min_roe'],
+        min_revenue_growth=FUNDAMENTAL_FILTERS['min_revenue_growth'],
+        max_debt_ratio=FUNDAMENTAL_FILTERS.get('max_debt_ratio', 0.70),
+        min_market_cap=FUNDAMENTAL_FILTERS.get('min_market_cap', 5000000000)
+    )
+    print(f"基本面过滤后股票数量：{len(filtered_stocks)}")
+
+    from datetime import datetime, timedelta
+    end_date = datetime.now()
+    start_date = end_date - timedelta(days=days)
+
+    success_count = 0
+    for ts_code in filtered_stocks:
+        try:
+            # 获取历史数据
+            df = data_manager.get_daily_quotes(
+                ts_code,
+                start_date.strftime('%Y%m%d'),
+                end_date.strftime('%Y%m%d')
+            )
+            if not df.empty:
+                success_count += 1
+                print(f"  [OK] {ts_code}: {len(df)} 条")
+            else:
+                print(f"  [FAIL] {ts_code}: 无数据")
+        except Exception as e:
+            print(f"  [FAIL] {ts_code}: {e}")
+
+    print(f"\n数据获取完成：{success_count}/{len(filtered_stocks)} 只股票成功")
+    return filtered_stocks
+
+
 def run_backtest(strategy: str = "optimal", stocks: list = None,
                  start_date: str = '20250301', end_date: str = '20260319',
                  initial_capital: float = 1000000,
@@ -84,17 +130,10 @@ def run_backtest(strategy: str = "optimal", stocks: list = None,
     if stocks is None:
         if use_extended_pool:
             from config.settings import EXTENDED_STOCK_POOL, FUNDAMENTAL_FILTERS
-            if filter_fundamentals:
-                print('正在基本面过滤股票池...')
-                stocks = data_manager.filter_stock_pool_by_fundamentals(
-                    stock_list=EXTENDED_STOCK_POOL,
-                    max_pe=FUNDAMENTAL_FILTERS['max_pe'],
-                    min_roe=FUNDAMENTAL_FILTERS['min_roe'],
-                    min_revenue_growth=FUNDAMENTAL_FILTERS['min_revenue_growth']
-                )
-                print(f'基本面过滤后股票数量：{len(stocks)}')
-            else:
-                stocks = EXTENDED_STOCK_POOL
+            # 直接使用扩展股票池，不进行 API 调用过滤
+            # 基本面过滤已在数据更新时完成
+            stocks = EXTENDED_STOCK_POOL
+            print(f'使用扩展股票池：{len(stocks)} 只股票')
         else:
             # 默认股票池
             stocks = ['000001.SZ', '000002.SZ', '000063.SZ', '000014.SZ', '000016.SZ']
@@ -121,6 +160,9 @@ def run_backtest(strategy: str = "optimal", stocks: list = None,
         # 如果指定了信号阈值，需要修改策略参数
         if signal_threshold is not None:
             strat.params.signal_threshold = signal_threshold
+    elif strategy.lower() == 'trend':
+        # 趋势跟踪策略 - 使用优化参数
+        strat = create_trend_follow_strategy()
     elif strategy.lower() == 'enhanced':
         strat = EnhancedMaCrossoverStrategy()
     elif strategy.lower() == 'ma':
@@ -142,6 +184,86 @@ def run_backtest(strategy: str = "optimal", stocks: list = None,
     print(report)
 
     return result
+
+
+def run_cross_cycle_backtest(strategy: str = 'optimal', years: int = 3):
+    """
+    跨周期回测验证
+
+    Args:
+        strategy: 策略类型
+        years: 回测年数
+    """
+    from datetime import datetime, timedelta
+    from config.settings import EXTENDED_STOCK_POOL, FUNDAMENTAL_FILTERS
+
+    print('='*60)
+    print('跨周期回测验证')
+    print('='*60)
+
+    # 计算回测区间
+    end_date = datetime.now()
+    start_date = end_date - timedelta(days=years*365)
+
+    # 获取股票池
+    print(f"\n股票池：沪深 300 成分股 + 基本面过滤")
+    stocks = data_manager.filter_stock_pool_by_fundamentals(
+        stock_list=EXTENDED_STOCK_POOL,
+        max_pe=FUNDAMENTAL_FILTERS['max_pe'],
+        min_roe=FUNDAMENTAL_FILTERS['min_roe'],
+        min_revenue_growth=FUNDAMENTAL_FILTERS['min_revenue_growth']
+    )
+    print(f"过滤后股票数量：{len(stocks)}")
+
+    # 分段回测
+    print(f"\n回测区间：{start_date.strftime('%Y%m%d')} - {end_date.strftime('%Y%m%d')}")
+    print(f"回测年数：{years} 年")
+    print()
+
+    # 按年度分段回测
+    results = {}
+    for i in range(years):
+        year_start = start_date + timedelta(days=i*365)
+        year_end = year_start + timedelta(days=364)
+        if year_end > end_date:
+            year_end = end_date
+
+        period = f"{year_start.strftime('%Y%m%d')}-{year_end.strftime('%Y%m%d')}"
+        print(f"\n [{'第{i+1}年'}] {period}")
+        print('-'*50)
+
+        try:
+            result = run_backtest(
+                strategy=strategy,
+                stocks=stocks,
+                start_date=year_start.strftime('%Y%m%d'),
+                end_date=year_end.strftime('%Y%m%d'),
+                initial_capital=100000,
+                use_extended_pool=False,
+                filter_fundamentals=False
+            )
+            results[period] = result
+        except Exception as e:
+            print(f"回测失败：{e}")
+            results[period] = None
+
+    # 汇总对比
+    print("\n" + '='*60)
+    print('跨周期回测结果汇总')
+    print('='*60)
+    print(f"{'期间' :<25} {'年化收益' :<12} {'夏普比率' :<12} {'最大回撤' :<12}")
+    print('-'*60)
+    for period, result in results.items():
+        if result:
+            annual_return = result.get('annual_return', 0) * 100
+            sharpe = result.get('sharpe_ratio', 0)
+            max_dd = result.get('max_drawdown', 0) * 100
+            print(f"{period:<25} {annual_return:>8.2f}%  {sharpe:>8.2f}    {max_dd:>8.2f}%")
+        else:
+            print(f"{period:<25} 回测失败")
+    print('='*60)
+
+    return results
 
 
 def run_paper_trading(strategy: str = 'optimal', stocks: list = None, initial_capital: float = 100000):
@@ -167,12 +289,16 @@ def run_paper_trading(strategy: str = 'optimal', stocks: list = None, initial_ca
     # 创建风控控制器
     risk_controller = RiskController()
 
-    # 创建交易机器人
+    # 创建交易机器人 - 使用 start_services.py 启动
+    print(f"提示：请使用 'python start_services.py paper --strategy {strategy}' 启动模拟交易")
+    print(f"或使用 'python start_services.py all' 启动全部服务")
+    return
+
+    # 以下为旧代码，保留参考
     bot = create_trading_bot(
-        strategy=strat,
-        broker=broker,
-        risk_controller=risk_controller,
-        stock_pool=stocks
+        broker_type='paper',
+        strategy_name=strategy,
+        initial_capital=initial_capital
     )
 
     print(f"模拟交易已启动 (按 Ctrl+C 停止)")
@@ -206,8 +332,8 @@ def show_menu():
 def main():
     """主函数"""
     parser = argparse.ArgumentParser(description='中国股票量化自动交易系统')
-    parser.add_argument('command', choices=['init', 'update', 'backtest', 'paper', 'trade', 'menu'],
-                        help='命令：init(初始化), update(更新数据), backtest(回测), paper(模拟交易), trade(实盘交易), menu(交互菜单)')
+    parser.add_argument('command', choices=['init', 'update', 'backtest', 'paper', 'trade', 'menu', 'cross-cycle'],
+                        help='命令：init(初始化), update(更新数据), backtest(回测), paper(模拟交易), trade(实盘交易), menu(交互菜单), cross-cycle(跨周期回测)')
     parser.add_argument('--days', type=int, default=30, help='更新数据的天数')
     parser.add_argument('--start-date', type=str, help='回测开始日期 (YYYYMMDD)')
     parser.add_argument('--end-date', type=str, help='回测结束日期 (YYYYMMDD)')
@@ -219,6 +345,7 @@ def main():
     parser.add_argument('--use-extended-pool', action='store_true', default=True, help='使用扩展股票池')
     parser.add_argument('--no-fundamental-filter', action='store_true', help='不进行基本面过滤')
     parser.add_argument('--pool-size', type=int, default=30, help='股票池目标数量')
+    parser.add_argument('--years', type=int, default=3, help='跨周期回测年数')
     # 参数敏感性测试支持
     parser.add_argument('--stop-loss', type=float, default=None, help='止损比例 (可选，覆盖默认值)')
     parser.add_argument('--take-profit', type=float, default=None, help='止盈比例 (可选，覆盖默认值)')
@@ -229,7 +356,10 @@ def main():
     if args.command == 'init':
         init()
     elif args.command == 'update':
-        update_data(args.days, args.stocks)
+        if args.days > 365:
+            update_data_long_term(args.days)
+        else:
+            update_data(args.days, args.stocks)
     elif args.command == 'backtest':
         run_backtest(
             strategy=args.strategy,
@@ -249,6 +379,8 @@ def main():
         print("实盘交易功能需要配置券商接口")
     elif args.command == 'menu':
         interactive_menu()
+    elif args.command == 'cross-cycle':
+        run_cross_cycle_backtest(strategy=args.strategy, years=args.years)
 
 
 def interactive_menu():

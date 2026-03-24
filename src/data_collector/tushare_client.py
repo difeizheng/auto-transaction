@@ -393,16 +393,20 @@ class TushareClient:
         stock_list: List[str],
         max_pe: float = 50,
         min_roe: float = 0.05,
-        min_revenue_growth: float = 0.0
+        min_revenue_growth: float = 0.0,
+        max_debt_ratio: float = 0.70,
+        min_market_cap: float = 5000000000  # 最小市值 50 亿
     ) -> List[str]:
         """
-        基本面过滤股票池
+        基本面过滤股票池 (增强版)
 
         Args:
             stock_list: 待过滤的股票列表
             max_pe: 最大市盈率
             min_roe: 最小 ROE
             min_revenue_growth: 最小营收增长率
+            max_debt_ratio: 最大资产负债率 (默认 70%)
+            min_market_cap: 最小总市值 (默认 50 亿)
 
         Returns:
             符合基本面条件的股票列表
@@ -414,7 +418,8 @@ class TushareClient:
                 # 获取财务指标
                 fina_df = self.pro.fina_indicator(
                     ts_code=ts_code,
-                    fields=['ts_code', 'ann_date', 'pe', 'roe', 'total_revenue_yoy']
+                    fields=['ts_code', 'ann_date', 'pe', 'roe', 'total_revenue_yoy',
+                            'asset_liability_ratio']
                 )
 
                 if fina_df.empty:
@@ -426,6 +431,7 @@ class TushareClient:
                 pe = latest.get('pe', None)
                 roe = latest.get('roe', None)
                 revenue_growth = latest.get('total_revenue_yoy', None)
+                debt_ratio = latest.get('asset_liability_ratio', None)
 
                 # 过滤条件
                 if pe is not None and pe > max_pe:
@@ -433,6 +439,8 @@ class TushareClient:
                 if roe is not None and roe < min_roe * 100:  # Tushare ROE 为百分比
                     continue
                 if revenue_growth is not None and revenue_growth < min_revenue_growth * 100:
+                    continue
+                if debt_ratio is not None and debt_ratio > max_debt_ratio * 100:
                     continue
 
                 filtered_stocks.append(ts_code)
@@ -466,6 +474,49 @@ class TushareClient:
             data_logger.error(f"获取沪深 300 成分股失败：{e}")
 
         return []
+
+    def get_stock_industry(self, ts_code: str) -> Optional[str]:
+        """
+        获取股票所属行业
+
+        Args:
+            ts_code: 股票代码
+
+        Returns:
+            行业名称
+        """
+        try:
+            self._rate_limit()
+            df = self.pro.stock_basic(ts_code=ts_code, fields=['ts_code', 'industry'])
+            if not df.empty:
+                industry = df.iloc[0]['industry']
+                data_logger.debug(f"{ts_code} 所属行业：{industry}")
+                return industry
+        except Exception as e:
+            data_logger.warning(f"获取股票行业失败 {ts_code}: {e}")
+        return None
+
+    def get_market_cap(self, ts_code: str) -> Optional[float]:
+        """
+        获取股票总市值
+
+        Args:
+            ts_code: 股票代码
+
+        Returns:
+            总市值 (元)
+        """
+        try:
+            self._rate_limit()
+            df = self.pro.daily_basic(ts_code=ts_code, fields=['ts_code', 'total_mv'])
+            if not df.empty:
+                # 获取最新数据
+                latest = df.sort_values('trade_date', ascending=False).iloc[0]
+                market_cap = latest.get('total_mv', 0) * 10000  # Tushare 单位为千元
+                return market_cap
+        except Exception as e:
+            data_logger.warning(f"获取市值失败 {ts_code}: {e}")
+        return None
 
 
 # 创建客户端实例

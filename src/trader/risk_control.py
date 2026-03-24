@@ -16,8 +16,8 @@ class RiskLimits:
     """风险限制参数"""
     # 仓位限制
     max_position_ratio: float = 0.8  # 最大仓位比例
-    max_stock_position_ratio: float = 0.2  # 单只股票最大持仓比例
-    max_industry_ratio: float = 0.3  # 单一行业最大持仓比例
+    max_stock_position_ratio: float = 0.15  # 单只股票最大持仓比例 (降至 15%)
+    max_industry_ratio: float = 0.30  # 单一行业最大持仓比例
 
     # 交易限制
     max_order_value: float = 100000  # 单笔交易最大金额
@@ -35,6 +35,11 @@ class RiskLimits:
 
     # 集中度限制
     max_concentration: int = 10  # 最大持仓股票数量
+
+    # 动态仓位调整
+    volatility_lookback: int = 20  # 波动率观察期 (交易日)
+    base_volatility: float = 0.02  # 基准波动率 (2%)
+    volatility_scaling: float = 0.5  # 波动率缩放因子
 
 
 @dataclass
@@ -91,6 +96,15 @@ class RiskController:
         # 持仓成本记录 (用于止损止盈)
         self.position_costs: Dict[str, Dict] = {}  # {ts_code: {cost, highest_price}}
 
+        # 行业集中度跟踪 {industry: total_value}
+        self.industry_exposure: Dict[str, float] = {}
+
+        # 股票行业映射 {ts_code: industry}
+        self.stock_industry_map: Dict[str, str] = {}
+
+        # 波动率历史用于动态仓位调整 {ts_code: [volatility_values]}
+        self.volatility_history: Dict[str, List[float]] = {}
+
     def _adjust_for_aggressive_style(self):
         """调整为激进风格参数 (2 万资金)"""
         # 激进风格：更高仓位，更宽止损
@@ -103,6 +117,114 @@ class RiskController:
         self.limits.max_order_value = 20000  # 单笔最大 2 万
 
         trader_logger.info("风险控制参数已调整为激进风格 (2 万资金)")
+
+    def set_stock_industry(self, ts_code: str, industry: str):
+        """
+        设置股票所属行业
+
+        Args:
+            ts_code: 股票代码
+            industry: 行业名称
+        """
+        self.stock_industry_map[ts_code] = industry
+        trader_logger.debug(f"设置股票行业：{ts_code} -> {industry}")
+
+    def check_industry_concentration(
+        self,
+        ts_code: str,
+        order_value: float,
+        positions: Dict
+    ) -> Tuple[bool, str]:
+        """
+        检查行业集中度
+
+        Args:
+            ts_code: 股票代码
+            order_value: 订单金额
+            positions: 当前持仓
+
+        Returns:
+            (是否通过，原因) 元组
+        """
+        industry = self.stock_industry_map.get(ts_code)
+        if not industry:
+            return True, ""  # 未知行业，跳过检查
+
+        # 计算该行业当前持仓
+        current_industry_value = 0.0
+        total_position_value = 0.0
+
+        for held_code, pos in positions.items():
+            pos_value = pos.get('market_value', 0)
+            total_position_value += pos_value
+
+            held_industry = self.stock_industry_map.get(held_code)
+            if held_industry == industry:
+                current_industry_value += pos_value
+
+        # 加上拟买入金额
+        new_industry_value = current_industry_value + order_value
+        industry_ratio = new_industry_value / total_position_value if total_position_value > 0 else 0
+
+        if industry_ratio > self.limits.max_industry_ratio:
+            return False, f"超过行业集中度限制：{industry} 行业 {industry_ratio:.1%} > {self.limits.max_industry_ratio:.1%}"
+
+        return True, ""
+
+    def update_volatility_history(self, ts_code: str, volatility: float):
+        """
+        更新股票波动率历史
+
+        Args:
+            ts_code: 股票代码
+            volatility: 波动率值
+        """
+        if ts_code not in self.volatility_history:
+            self.volatility_history[ts_code] = []
+
+        self.volatility_history[ts_code].append(volatility)
+
+        # 保留观察期数据
+        lookback = self.limits.volatility_lookback
+        if len(self.volatility_history[ts_code]) > lookback:
+            self.volatility_history[ts_code] = self.volatility_history[ts_code][-lookback:]
+
+    def calculate_dynamic_position_adjustment(self, ts_code: str) -> float:
+        """
+        计算动态仓位调整因子
+
+        基于历史波动率：高波动降仓，低波动增仓
+
+        Args:
+            ts_code: 股票代码
+
+        Returns:
+            仓位调整因子 (0.5-1.5)
+        """
+        if ts_code not in self.volatility_history or not self.volatility_history[ts_code]:
+            return 1.0  # 无数据，不调整
+
+        vol_history = self.volatility_history[ts_code]
+        if len(vol_history) < 5:
+            return 1.0  # 数据不足，不调整
+
+        # 计算平均波动率
+        avg_volatility = np.mean(vol_history[-self.limits.volatility_lookback:])
+        base_vol = self.limits.base_volatility
+
+        # 波动率调整因子
+        # 波动率 > 基准 -> 降仓 (最低 0.5)
+        # 波动率 < 基准 -> 增仓 (最高 1.5)
+        if base_vol > 0:
+            vol_ratio = avg_volatility / base_vol
+            adjustment = 1.0 / (1.0 + self.limits.volatility_scaling * (vol_ratio - 1.0))
+        else:
+            adjustment = 1.0
+
+        # 限制调整范围
+        adjustment = max(0.5, min(1.5, adjustment))
+
+        return adjustment
 
     def check_order(
         self,
@@ -164,6 +286,11 @@ class RiskController:
 
             if new_stock_ratio > self.limits.max_stock_position_ratio:
                 return False, f"超过单只股票持仓限制：{new_stock_ratio:.2%}"
+
+            # 检查行业集中度
+            industry_ok, industry_reason = self.check_industry_concentration(ts_code, order_value, positions)
+            if not industry_ok:
+                return False, industry_reason
 
             # 检查持仓集中度
             if len(positions) >= self.limits.max_concentration and ts_code not in positions:
@@ -378,6 +505,36 @@ class RiskController:
 
         return self.metrics
 
+    def get_industry_exposure(self, positions: Dict) -> Dict[str, Dict]:
+        """
+        获取行业暴露度
+
+        Args:
+            positions: 持仓
+
+        Returns:
+            {industry: {value, ratio, stocks}}
+        """
+        exposure = {}
+        total_value = sum(pos.get('market_value', 0) for pos in positions.values())
+
+        for ts_code, pos in positions.items():
+            industry = self.stock_industry_map.get(ts_code, '未知')
+            pos_value = pos.get('market_value', 0)
+
+            if industry not in exposure:
+                exposure[industry] = {'value': 0, 'ratio': 0, 'stocks': []}
+
+            exposure[industry]['value'] += pos_value
+            exposure[industry]['stocks'].append(ts_code)
+
+        # 计算比例
+        for industry in exposure:
+            if total_value > 0:
+                exposure[industry]['ratio'] = exposure[industry]['value'] / total_value
+
+        return exposure
+
     def generate_risk_report(self, current_capital: float, positions: Dict) -> str:
         """
         生成风险报告
@@ -390,6 +547,7 @@ class RiskController:
             风险报告文本
         """
         metrics = self.get_risk_metrics(current_capital, positions)
+        industry_exposure = self.get_industry_exposure(positions)
 
         report = []
         report.append("=" * 50)
@@ -399,6 +557,11 @@ class RiskController:
         report.append("【仓位状况】")
         report.append(f"  总仓位：{metrics.position_ratio * 100:.1f}%")
         report.append(f"  最大个股仓位：{metrics.largest_position_ratio * 100:.1f}%")
+        report.append("")
+        report.append("【行业集中度】")
+        for industry, data in sorted(industry_exposure.items(), key=lambda x: x[1]['ratio'], reverse=True):
+            stocks = ', '.join(data['stocks'][:3])  # 只显示前 3 只
+            report.append(f"  {industry}: {data['ratio']*100:.1f}% ({stocks})")
         report.append("")
         report.append("【盈亏状况】")
         report.append(f"  浮动盈亏：{metrics.unrealized_profit_loss:.2f}")

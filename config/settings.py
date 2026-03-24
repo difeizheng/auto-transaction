@@ -87,11 +87,22 @@ EXTENDED_STOCK_POOL = [
     '600030.SH', '601668.SH'
 ]
 
-# 基本面过滤条件
+# 基本面过滤条件 (增强版)
 FUNDAMENTAL_FILTERS = {
     'max_pe': 50,        # 市盈率 < 50
     'min_roe': 0.05,     # ROE > 5%
     'min_revenue_growth': 0.0,  # 营收增长 > 0
+    'max_debt_ratio': 0.70,     # 资产负债率 < 70%
+    'min_market_cap': 5000000000,  # 最小市值 50 亿
+}
+
+# 调仓周期配置
+REBALANCE_CONFIG = {
+    'enabled': True,              # 启用定期调仓
+    'frequency': 'monthly',       # 调仓频率：weekly/monthly/quarterly
+    'max_turnover_ratio': 0.30,   # 单次最大调仓比例 30%
+    'holding_period_min': 5,      # 最小持有期 (交易日)
+    'holding_period_max': 60,     # 最大持有期 (交易日)
 }
 
 # ============ 通知配置 ============

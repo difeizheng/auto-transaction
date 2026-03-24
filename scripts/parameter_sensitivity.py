@@ -1,5 +1,5 @@
 """
-参数敏感性分析脚本
+参数敏感性分析脚本 - 真实回测版
 测试不同止损止盈参数组合的表现
 
 使用方法:
@@ -15,16 +15,20 @@ import pandas as pd
 from itertools import product
 from datetime import datetime
 from pathlib import Path
+import sys
 
-# 参数网格
-STOP_LOSS_LIST = [0.05, 0.06, 0.07, 0.08, 0.10]
-TAKE_PROFIT_LIST = [0.15, 0.18, 0.20, 0.25, 0.30]
-THRESHOLD_LIST = [3.5, 4.0, 4.5, 5.0]
+# 添加项目根目录到路径
+sys.path.insert(0, str(Path(__file__).parent.parent))
 
-# 回测参数
+# 参数网格 - 扩大测试范围
+STOP_LOSS_LIST = [0.04, 0.05, 0.06, 0.07, 0.08, 0.10]
+TAKE_PROFIT_LIST = [0.12, 0.15, 0.18, 0.20, 0.25, 0.30]
+THRESHOLD_LIST = [3.5, 4.0, 4.5, 5.0, 5.5]
+
+# 回测参数 - 使用 3 年数据验证
 STOCKS = ['000001.SZ', '000002.SZ', '000063.SZ', '000014.SZ', '000016.SZ']
-START_DATE = '20250319'
-END_DATE = '20260319'
+START_DATE = '20230324'
+END_DATE = '20260323'
 
 # 结果缓存目录
 CACHE_DIR = Path('data/cache')
@@ -98,60 +102,111 @@ def run_backtest(stop_loss, take_profit, threshold):
 
     print(f"  [测试] SL={stop_loss*100:.0f}%, TP={take_profit*100:.0f}%, Thr={threshold}", end=" ... ")
 
-    # 构建命令
-    # 注意：需要修改 main.py 或 optimal_strategy.py 以支持动态参数
-    # 这里使用环境变量或直接修改策略参数
+    # 构建真实回测命令 - 通过修改策略参数运行回测
+    # 使用 main.py 的命令行接口传递参数
     cmd = (
-        f"python -c \"from src.strategy.optimal_strategy import create_optimal_strategy; "
-        f"from main import run_backtest; "
-        f"result = run_backtest(strategy='optimal', stocks={STOCKS}, "
-        f"start_date='{START_DATE}', end_date='{END_DATE}', initial_capital=1000000); "
-        f"print('done')\" 2>&1"
+        f'python main.py backtest --strategy optimal '
+        f'--start-date {START_DATE} --end-date {END_DATE} '
+        f'--capital 1000000 2>&1'
     )
 
-    # 由于动态参数传递复杂，这里简化处理：
-    # 直接返回当前参数的回测结果占位符
-    # 实际使用时需要修改 optimal_strategy.py 或创建临时策略文件
+    # 由于命令行不直接支持止损止盈参数，我们需要临时修改策略文件或通过 Python API 调用
+    # 这里采用直接 Python 调用的方式
+    python_code = f'''
+import sys
+sys.path.insert(0, '.')
+from pathlib import Path
 
-    # 临时方案：返回当前已测试参数的近似值
-    # 实际使用时应该真正运行回测
+# 临时修改策略参数
+from src.strategy.optimal_strategy import OptimalStrategyParams, OptimalStrategy
 
-    result = {
-        'stop_loss': stop_loss,
-        'take_profit': take_profit,
-        'threshold': threshold,
-        'total_return': 0.0,
-        'annual_return': 0.0,
-        'sharpe': 0.0,
-        'win_rate': 0.0,
-        'profit_loss_ratio': 0.0,
-        'max_drawdown': 0.0,
-        'total_trades': 0
-    }
+# 创建自定义参数
+params = OptimalStrategyParams(
+    base_stop_loss={stop_loss},
+    base_take_profit={take_profit},
+    signal_threshold={threshold}
+)
 
-    # 根据已知数据点估算（仅供参考）
-    # 基准：SL=7%, TP=20%, Thr=4.0 → 年化 5.28%, 夏普 0.45, 回撤 8.38%
-    base_return = 0.0528
-    base_sharpe = 0.45
-    base_dd = 0.0838
+# 从 main.py 导入 run_backtest
+from main import run_backtest
 
-    # 简单估算：止损越小收益越高（止损频繁），止盈越大收益越高（但难达成）
-    # 这是一个粗略的线性模型
-    sl_factor = 1.0 - (stop_loss - 0.07) * 2  # 止损每增加 1%，收益降低 2%
-    tp_factor = 1.0 + (take_profit - 0.20) * 0.5  # 止盈每增加 1%，收益增加 0.5%
-    thr_factor = 1.0 - (threshold - 4.0) * 0.1  # 阈值越高，交易越少，收益略降
+# 运行回测 - 需要修改 run_backtest 以支持参数传递
+result = run_backtest(
+    strategy='optimal',
+    stocks={STOCKS},
+    start_date='{START_DATE}',
+    end_date='{END_DATE}',
+    initial_capital=1000000,
+    stop_loss={stop_loss},
+    take_profit={take_profit},
+    signal_threshold={threshold}
+)
 
-    result['annual_return'] = base_return * sl_factor * tp_factor * thr_factor
-    result['sharpe'] = base_sharpe * (1.0 - abs(stop_loss - 0.07) * 5)  # 止损 7% 附近夏普最高
-    result['max_drawdown'] = base_dd * (1.0 + (stop_loss - 0.07) * 3)  # 止损越大回撤越大
-    result['win_rate'] = 0.33 + (threshold - 4.0) * 0.02  # 阈值越高胜率略高
-    result['profit_loss_ratio'] = (take_profit / stop_loss) * 0.8  # 理论盈亏比
-    result['total_trades'] = int(7 * (1.0 - (threshold - 4.0) * 0.15))  # 阈值越高交易越少
-    result['total_return'] = result['annual_return']
+# 输出结果
+print(f"总收益率：{{result.get('total_return', 0)*100:.2f}}%")
+print(f"年化收益率：{{result.get('annual_return', 0)*100:.2f}}%")
+print(f"夏普比率：{{result.get('sharpe_ratio', 0):.2f}}")
+print(f"最大回撤：{{result.get('max_drawdown', 0)*100:.2f}}%")
+print(f"胜率：{{result.get('win_rate', 0)*100:.2f}}%")
+print(f"盈亏比：{{result.get('profit_loss_ratio', 0):.2f}}")
+print(f"总交易次数：{{result.get('total_trades', 0)}}")
+'''
 
-    print(f"年化={result['annual_return']*100:.2f}%, 夏普={result['sharpe']:.2f}, 回撤={result['max_drawdown']*100:.2f}%")
+    try:
+        # 运行 Python 代码
+        result_output = subprocess.run(
+            ['python', '-c', python_code],
+            capture_output=True,
+            text=True,
+            timeout=300
+        )
+        output = result_output.stdout + result_output.stderr
 
-    return result
+        # 保存缓存
+        with open(cache_file, 'w', encoding='utf-8') as f:
+            f.write(output)
+
+        # 解析结果
+        result = parse_backtest_output(output)
+        result['stop_loss'] = stop_loss
+        result['take_profit'] = take_profit
+        result['threshold'] = threshold
+
+        if result['annual_return'] != 0 or result['sharpe'] != 0:
+            print(f"年化={result['annual_return']*100:.2f}%, 夏普={result['sharpe']:.2f}, 回撤={result['max_drawdown']*100:.2f}%")
+        else:
+            print(f"失败")
+
+        return result
+
+    except subprocess.TimeoutExpired:
+        print(f"超时")
+        return {
+            'stop_loss': stop_loss,
+            'take_profit': take_profit,
+            'threshold': threshold,
+            'total_return': 0.0,
+            'annual_return': 0.0,
+            'sharpe': 0.0,
+            'win_rate': 0.0,
+            'profit_loss_ratio': 0.0,
+            'max_drawdown': 0.0,
+            'total_trades': 0
+        }
+    except Exception as e:
+        print(f"错误：{e}")
+        return {
+            'stop_loss': stop_loss,
+            'take_profit': take_profit,
+            'threshold': threshold,
+            'total_return': 0.0,
+            'annual_return': 0.0,
+            'sharpe': 0.0,
+            'win_rate': 0.0,
+            'profit_loss_ratio': 0.0,
+            'max_drawdown': 0.0,
+            'total_trades': 0
+        }
 
 
 def main():

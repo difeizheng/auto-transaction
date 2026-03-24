@@ -11,7 +11,10 @@
       "Bash(git remote:*)",
       "Bash(git branch:*)",
       "Bash(git push:*)",
-      "Bash(git add:*)"
+      "Bash(git add:*)",
+      "Bash(tee fetch_log.txt)",
+      "Bash(ls -la data/cache/*.csv)",
+      "Bash(tee data/cache/final_param_search.log)"
     ]
   }
 }

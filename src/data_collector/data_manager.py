@@ -386,18 +386,22 @@ class DataManager:
     def filter_stock_pool_by_fundamentals(
         self,
         stock_list: Optional[List[str]] = None,
-        max_pe: float = 50,
-        min_roe: float = 0.05,
-        min_revenue_growth: float = 0.0
+        max_pe: float = None,
+        min_roe: float = None,
+        min_revenue_growth: float = None,
+        max_debt_ratio: float = None,
+        min_market_cap: float = None
     ) -> List[str]:
         """
-        基本面过滤股票池
+        基本面过滤股票池 (增强版)
 
         Args:
             stock_list: 待过滤的股票列表，None 表示使用扩展股票池
             max_pe: 最大市盈率
             min_roe: 最小 ROE
             min_revenue_growth: 最小营收增长率
+            max_debt_ratio: 最大资产负债率
+            min_market_cap: 最小总市值
 
         Returns:
             符合基本面条件的股票列表
@@ -405,11 +409,21 @@ class DataManager:
         if stock_list is None:
             stock_list = settings.EXTENDED_STOCK_POOL
 
+        # 从配置读取默认值
+        filters = settings.FUNDAMENTAL_FILTERS
+        max_pe = max_pe or filters.get('max_pe', 50)
+        min_roe = min_roe or filters.get('min_roe', 0.05)
+        min_revenue_growth = min_revenue_growth or filters.get('min_revenue_growth', 0.0)
+        max_debt_ratio = max_debt_ratio or filters.get('max_debt_ratio', 0.70)
+        min_market_cap = min_market_cap or filters.get('min_market_cap', 5000000000)
+
         return self.ts_client.filter_stocks_by_fundamentals(
             stock_list=stock_list,
             max_pe=max_pe,
             min_roe=min_roe,
-            min_revenue_growth=min_revenue_growth
+            min_revenue_growth=min_revenue_growth,
+            max_debt_ratio=max_debt_ratio,
+            min_market_cap=min_market_cap
         )
 
     def get_hs300_filtered(
@@ -439,6 +453,87 @@ class DataManager:
             min_roe=min_roe,
             min_revenue_growth=min_revenue_growth
         )
+
+    def get_stock_industry_mapping(self, stock_list: List[str]) -> Dict[str, str]:
+        """
+        获取股票行业映射
+
+        Args:
+            stock_list: 股票代码列表
+
+        Returns:
+            {ts_code: industry} 映射字典
+        """
+        industry_map = {}
+        for ts_code in stock_list:
+            industry = self.ts_client.get_stock_industry(ts_code)
+            if industry:
+                industry_map[ts_code] = industry
+        return industry_map
+
+    def check_rebalance_date(self, last_rebalance_date: str) -> bool:
+        """
+        检查是否需要调仓
+
+        Args:
+            last_rebalance_date: 上次调仓日期 (YYYYMMDD)
+
+        Returns:
+            是否需要调仓
+        """
+        config = settings.REBALANCE_CONFIG
+        if not config.get('enabled', False):
+            return False
+
+        last_dt = datetime.strptime(last_rebalance_date, "%Y%m%d")
+        today = datetime.now()
+
+        # 计算调仓周期
+        frequency = config.get('frequency', 'monthly')
+        if frequency == 'weekly':
+            days_threshold = 7
+        elif frequency == 'monthly':
+            days_threshold = 21  # 约 21 个交易日
+        elif frequency == 'quarterly':
+            days_threshold = 63  # 约 63 个交易日
+        else:
+            days_threshold = 21
+
+        days_since_rebalance = (today - last_dt).days
+        return days_since_rebalance >= days_threshold
+
+    def generate_rebalance_candidates(
+        self,
+        current_holdings: List[str],
+        stock_pool: List[str],
+        max_turnover_ratio: float = 0.30
+    ) -> Dict[str, List[str]]:
+        """
+        生成调仓候选股票
+
+        Args:
+            current_holdings: 当前持仓
+            stock_pool: 可选股票池
+            max_turnover_ratio: 最大调仓比例
+
+        Returns:
+            {to_buy: [...], to_sell: [...]} 调仓建议
+        """
+        # 计算最大调仓数量
+        max_turnover_count = max(1, int(len(current_holdings) * max_turnover_ratio))
+
+        # 卖出建议：不在股票池中的持仓
+        to_sell = [code for code in current_holdings if code not in stock_pool]
+        to_sell = to_sell[:max_turnover_count]  # 限制调仓数量
+
+        # 买入建议：股票池中但不在持仓的股票
+        to_buy_candidates = [code for code in stock_pool if code not in current_holdings]
+        to_buy = to_buy_candidates[:max_turnover_count]  # 限制调仓数量
+
+        return {
+            'to_buy': to_buy,
+            'to_sell': to_sell
+        }
 
 
 # 创建数据管理器实例
