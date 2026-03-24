@@ -1,0 +1,124 @@
+"""
+测试高质量趋势策略
+"""
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).parent.parent))
+
+from src.strategy.hq_trend_strategy import create_hq_trend_strategy
+from src.backtest.engine import BacktestEngine
+from src.data_collector.data_manager import data_manager
+
+# 配置
+STOCKS = ['000001.SZ', '000002.SZ', '000063.SZ', '000014.SZ', '000016.SZ']
+START_DATE = '20240324'
+END_DATE = '20260323'
+INITIAL_CAPITAL = 1000000
+
+def load_data(stocks, start_date, end_date):
+    data_dict = {}
+    for ts_code in stocks:
+        df = data_manager.get_daily_quotes(ts_code, start_date, end_date)
+        if not df.empty:
+            data_dict[ts_code] = df
+    return data_dict
+
+def test_hq_strategy():
+    print("=" * 80)
+    print("高质量趋势策略测试")
+    print("=" * 80)
+    print(f"回测区间：{START_DATE} - {END_DATE}")
+    print(f"股票池：{len(STOCKS)} 只")
+    print()
+
+    # 加载数据
+    print("加载数据...")
+    data_dict = load_data(STOCKS, START_DATE, END_DATE)
+
+    # 测试不同参数组合
+    test_cases = [
+        # (stop_loss, take_profit, threshold)
+        (0.06, 0.15, 4.0),
+        (0.06, 0.18, 4.0),
+        (0.06, 0.20, 4.0),
+        (0.05, 0.15, 4.0),
+        (0.05, 0.18, 4.0),
+        (0.05, 0.20, 4.5),
+        (0.07, 0.18, 4.0),
+        (0.06, 0.15, 4.5),
+    ]
+
+    results = []
+
+    for sl, tp, thr in test_cases:
+        print(f"\n测试参数：SL={sl*100:.0f}%, TP={tp*100:.0f}%, Threshold={thr}")
+
+        strategy = create_hq_trend_strategy(
+            stop_loss=sl,
+            take_profit=tp,
+            signal_threshold=thr
+        )
+
+        engine = BacktestEngine(initial_capital=INITIAL_CAPITAL)
+        engine.set_strategy(strategy)
+
+        try:
+            result = engine.run(data_dict)
+            results.append({
+                'stop_loss': sl,
+                'take_profit': tp,
+                'threshold': thr,
+                'total_return': result.total_return,
+                'annual_return': result.annual_return,
+                'sharpe': result.sharpe_ratio,
+                'max_drawdown': result.max_drawdown,
+                'win_rate': result.win_rate,
+                'profit_factor': result.profit_factor,
+                'total_trades': result.total_trades,
+            })
+            print(f"  年化={result.annual_return*100:.2f}%, 夏普={result.sharpe_ratio:.2f}, "
+                  f"回撤={result.max_drawdown*100:.2f}%, 胜率={result.win_rate*100:.1f}%, "
+                  f"盈亏比={result.profit_factor:.2f}")
+        except Exception as e:
+            print(f"  错误：{e}")
+
+    if not results:
+        print("\n没有成功结果")
+        return
+
+    import pandas as pd
+    df = pd.DataFrame(results)
+
+    print("\n" + "=" * 80)
+    print("Top 5 - 按年化收益排序")
+    print("=" * 80)
+    for _, r in df.nlargest(5, 'annual_return').iterrows():
+        print(f"SL={r['stop_loss']:.0f}%, TP={r['take_profit']:.0f}%, Thr={r['threshold']} -> "
+              f"年化={r['annual_return']*100:.2f}%, 夏普={r['sharpe']:.2f}, "
+              f"回撤={r['max_drawdown']*100:.2f}%, 胜率={r['win_rate']*100:.1f}%")
+
+    print("\n" + "=" * 80)
+    print("Top 5 - 按夏普比率排序")
+    print("=" * 80)
+    for _, r in df.nlargest(5, 'sharpe').iterrows():
+        print(f"SL={r['stop_loss']:.0f}%, TP={r['take_profit']:.0f}%, Thr={r['threshold']} -> "
+              f"年化={r['annual_return']*100:.2f}%, 夏普={r['sharpe']:.2f}, "
+              f"回撤={r['max_drawdown']*100:.2f}%, 胜率={r['win_rate']*100:.1f}%")
+
+    # 最优参数
+    if len(df) > 0:
+        best = df.loc[df['sharpe'].idxmax()]
+        print("\n" + "=" * 80)
+        print("最优参数组合")
+        print("=" * 80)
+        print(f"止损：{best['stop_loss']*100:.0f}%")
+        print(f"止盈：{best['take_profit']:.0f}%")
+        print(f"信号阈值：{best['threshold']}")
+        print(f"年化：{best['annual_return']*100:.2f}%")
+        print(f"夏普：{best['sharpe']:.2f}")
+        print(f"回撤：{best['max_drawdown']*100:.2f}%")
+        print(f"胜率：{best['win_rate']*100:.1f}%")
+        print(f"盈亏比：{best['profit_factor']:.2f}")
+
+if __name__ == "__main__":
+    test_hq_strategy()

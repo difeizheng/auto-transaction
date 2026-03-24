@@ -22,7 +22,7 @@ class MarketState(Enum):
 
 @dataclass
 class OptimalStrategyParams:
-    """最优策略参数 - 优化版 (高胜率 + 高盈亏比)"""
+    """最优策略参数 - v2.0 深度优化版 (高胜率 + 高盈亏比 + 市场过滤)"""
     # 均线系统
     ma_short: int = 5
     ma_mid: int = 10
@@ -47,13 +47,13 @@ class OptimalStrategyParams:
     bb_window: int = 20
     bb_num_std: float = 2.0
 
-    # 动态止损止盈 - 优化版 (紧止损 + 宽止盈 + 移动止损)
-    base_stop_loss: float = 0.06      # 基础止损 6% (紧止损)
-    base_take_profit: float = 0.18    # 基础止盈 18% (宽止盈)
+    # 动态止损止盈 - v2.0 优化版 (小止损 + 分级止盈 + 移动止损)
+    base_stop_loss: float = 0.05      # 基础止损 5% (紧止损)
+    base_take_profit: float = 0.25    # 基础止盈 25% (宽止盈)
     atr_multiplier_sl: float = 1.5    # ATR 止损倍数
     atr_multiplier_tp: float = 3.5    # ATR 止盈倍数
-    trailing_stop_trigger: float = 0.08  # 移动止损触发点 8%
-    trailing_stop_ratio: float = 0.04    # 移动止损回撤 4%
+    trailing_stop_trigger: float = 0.10  # 移动止损触发点 10%
+    trailing_stop_ratio: float = 0.05    # 移动止损回撤 5%
 
     # 仓位管理
     base_position_ratio: float = 0.20  # 基础仓位 20%
@@ -66,9 +66,13 @@ class OptimalStrategyParams:
     # 信号阈值（动态可配置）
     signal_threshold: float = 5.0      # 信号触发阈值 5.0/10.5 (更严格)
 
-    # 新增：时间止损
+    # 时间止损
     time_stop_days: int = 8            # 时间止损天数
     time_stop_profit_threshold: float = 0.03  # 时间止损盈利阈值
+
+    # v2.0 新增：市场过滤
+    use_market_filter: bool = True     # 启用市场状态过滤
+    market_bear_max_position: float = 0.05  # 熊市最大仓位 5%
 
 
 class OptimalStrategy(BaseStrategy):
