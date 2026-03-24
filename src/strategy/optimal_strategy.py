@@ -670,17 +670,22 @@ def create_optimal_strategy(
     take_profit: float = None,    # 默认使用参数类中的值
     position_ratio: float = None,
     signal_threshold: float = None,  # 信号触发阈值
-    aggressive: bool = False
+    aggressive: bool = False,
+    mode: str = 'conservative'  # 'conservative'(稳健版 53%) / 'aggressive'(进取版 55%) / 'default'
 ) -> OptimalStrategy:
     """
     创建最优策略
 
     Args:
-        stop_loss: 止损比例 (默认 6%)
-        take_profit: 止盈比例 (默认 18%)
+        stop_loss: 止损比例 (默认 4%)
+        take_profit: 止盈比例 (默认 35%)
         position_ratio: 基础仓位比例
-        signal_threshold: 信号触发阈值 (默认 5.0)
-        aggressive: 是否激进模式
+        signal_threshold: 信号触发阈值 (默认 5.5)
+        aggressive: 是否激进模式 (已废弃，使用 mode 参数)
+        mode: 配置模式
+            - 'conservative': 稳健版 (牛市 53%, 回撤更优)
+            - 'aggressive': 进取版 (牛市 55%, 收益更高)
+            - 'default': 默认配置
 
     Returns:
         OptimalStrategy 实例
@@ -689,39 +694,44 @@ def create_optimal_strategy(
     default_params = OptimalStrategyParams()
 
     if stop_loss is None:
-        stop_loss = default_params.base_stop_loss
+        stop_loss = 0.04  # 默认 4%
     if take_profit is None:
-        take_profit = default_params.base_take_profit
-    if position_ratio is None:
-        position_ratio = default_params.base_position_ratio
+        take_profit = 0.35  # 默认 35%
     if signal_threshold is None:
-        signal_threshold = default_params.signal_threshold
+        signal_threshold = 5.5  # 默认 5.5
 
-    if aggressive:
-        # 激进模式：更高仓位
-        params = OptimalStrategyParams(
-            base_stop_loss=stop_loss,
-            base_take_profit=take_profit,
-            base_position_ratio=min(position_ratio * 1.2, 0.30),
-            max_position_ratio=0.35,
-            trailing_stop_trigger=default_params.trailing_stop_trigger,
-            trailing_stop_ratio=default_params.trailing_stop_ratio,
-            signal_threshold=signal_threshold,
-            time_stop_days=default_params.time_stop_days,
-            time_stop_profit_threshold=default_params.time_stop_profit_threshold,
-        )
-        return OptimalStrategy(name="optimal_aggressive", params=params)
+    # 根据 mode 设置仓位参数
+    if mode == 'aggressive' or mode == 'aggressive_old':
+        # 进取版：牛市 55%
+        base_pos = 0.35
+        max_pos = 0.55
+        bear_pos = 0.02
+        name_suffix = "进取版 (牛市 55%)"
+    elif mode == 'conservative' or mode == 'conservative_53':
+        # 稳健版：牛市 53% (推荐)
+        base_pos = 0.33
+        max_pos = 0.53
+        bear_pos = 0.02
+        name_suffix = "稳健版 (牛市 53%)"
     else:
-        # 稳健模式
-        params = OptimalStrategyParams(
-            base_stop_loss=stop_loss,
-            base_take_profit=take_profit,
-            base_position_ratio=position_ratio,
-            max_position_ratio=0.30,
-            trailing_stop_trigger=default_params.trailing_stop_trigger,
-            trailing_stop_ratio=default_params.trailing_stop_ratio,
-            signal_threshold=signal_threshold,
-            time_stop_days=default_params.time_stop_days,
-            time_stop_profit_threshold=default_params.time_stop_profit_threshold,
-        )
-        return OptimalStrategy(name="optimal_conservative", params=params)
+        # 默认配置
+        base_pos = position_ratio if position_ratio else default_params.base_position_ratio
+        max_pos = default_params.max_position_ratio
+        bear_pos = default_params.market_bear_max_position
+        name_suffix = "default"
+
+    params = OptimalStrategyParams(
+        base_stop_loss=stop_loss,
+        base_take_profit=take_profit,
+        base_position_ratio=base_pos,
+        max_position_ratio=max_pos,
+        min_position_ratio=0.01,
+        market_bear_max_position=bear_pos,
+        trailing_stop_trigger=0.15,    # 移动止损触发 15%
+        trailing_stop_ratio=0.06,       # 回撤 6%
+        signal_threshold=signal_threshold,
+        time_stop_days=10,
+        time_stop_profit_threshold=0.03,
+        use_market_filter=True,
+    )
+    return OptimalStrategy(name=f"optimal_{name_suffix}", params=params)

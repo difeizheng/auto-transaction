@@ -70,8 +70,13 @@ def start_scheduler():
         sys.exit(0)
 
 
-def start_paper_trading(strategy: str = 'optimal', capital: float = 100000):
-    """启动模拟交易"""
+def start_paper_trading(strategy: str = 'optimal', capital: float = 100000, mode: str = 'conservative'):
+    """启动模拟交易
+    Args:
+        strategy: 策略类型
+        capital: 初始资金
+        mode: 配置模式 ('conservative' 稳健版 53% / 'aggressive' 进取版 55%)
+    """
     print('='*60)
     print('中国股票量化自动交易系统 - 模拟交易')
     print('='*60)
@@ -79,8 +84,14 @@ def start_paper_trading(strategy: str = 'optimal', capital: float = 100000):
 
     # 创建策略
     if strategy == 'optimal':
-        strat = create_optimal_strategy(aggressive=True)
-        print(f'策略：最优策略 (激进模式)')
+        strat = create_optimal_strategy(aggressive=(mode=='aggressive'), mode=mode)
+        print(f'策略：最优策略 ({mode} 模式)')
+        if mode == 'conservative':
+            print(f'  配置：牛市 53% / 阈值 5.5 / 止损 4% / 止盈 35%')
+            print(f'  预期：年化 15.22%, 回撤 14.46%, 胜率 51.4%')
+        elif mode == 'aggressive':
+            print(f'  配置：牛市 55% / 阈值 5.5 / 止损 4% / 止盈 35%')
+            print(f'  预期：年化 16.15%, 回撤 15.26%, 胜率 51.4%')
     elif strategy == 'enhanced':
         from src.strategy.enhanced_ma import EnhancedMaCrossoverStrategy
         strat = EnhancedMaCrossoverStrategy()
@@ -99,8 +110,8 @@ def start_paper_trading(strategy: str = 'optimal', capital: float = 100000):
     print('风控规则：已加载')
 
     # 股票池
-    stock_pool = ['000001.SZ', '000002.SZ', '000063.SZ', '000014.SZ', '000016.SZ']
-    print(f'股票池：{len(stock_pool)} 只股票')
+    stock_pool = ['000063.SZ', '000014.SZ', '000078.SZ', '000039.SZ', '000001.SZ']
+    print(f'股票池：{len(stock_pool)} 只股票：{", ".join(stock_pool)}')
     print()
 
     # 创建交易机器人
@@ -130,18 +141,21 @@ def main():
                         help='策略类型：optimal, enhanced, technical')
     parser.add_argument('--capital', type=float, default=100000,
                         help='模拟交易初始资金')
+    parser.add_argument('--mode', type=str, default='conservative',
+                        choices=['conservative', 'aggressive'],
+                        help='配置模式：conservative(稳健版 53%), aggressive(进取版 55%)')
 
     args = parser.parse_args()
 
     if args.service == 'scheduler':
         start_scheduler()
     elif args.service == 'paper':
-        start_paper_trading(strategy=args.strategy, capital=args.capital)
+        start_paper_trading(strategy=args.strategy, capital=args.capital, mode=args.mode)
     elif args.service == 'all':
         print('启动全部服务...')
         print()
         # 先启动模拟交易
-        start_paper_trading(strategy=args.strategy, capital=args.capital)
+        start_paper_trading(strategy=args.strategy, capital=args.capital, mode=args.mode)
 
 
 if __name__ == '__main__':
