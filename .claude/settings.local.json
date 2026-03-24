@@ -14,7 +14,8 @@
       "Bash(git add:*)",
       "Bash(tee fetch_log.txt)",
       "Bash(ls -la data/cache/*.csv)",
-      "Bash(tee data/cache/final_param_search.log)"
+      "Bash(tee data/cache/final_param_search.log)",
+      "WebFetch(domain:localhost)"
     ]
   }
 }
