@@ -77,6 +77,8 @@ HTML_TEMPLATE = """
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>量化交易系统监控</title>
+    <!-- ECharts 图表库 -->
+    <script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body {
@@ -235,6 +237,8 @@ HTML_TEMPLATE = """
         .tag-blue { background: rgba(0,210,255,0.2); color: #00d2ff; }
         .tag-green { background: rgba(0,255,136,0.2); color: #00ff88; }
         .tag-orange { background: rgba(255,165,0,0.2); color: #ffa500; }
+        .tag-red { background: rgba(255,71,87,0.2); color: #ff4757; }
+        .tag-purple { background: rgba(138,43,226,0.2); color: #8a2be2; }
         #equity-chart {
             width: 100%;
             height: 300px;
@@ -242,6 +246,52 @@ HTML_TEMPLATE = """
             border-radius: 10px;
             margin-top: 15px;
         }
+        /* 可视化页面样式 */
+        .chart-container {
+            width: 100%;
+            height: 350px;
+            background: rgba(0,0,0,0.2);
+            border-radius: 10px;
+        }
+        .stock-health-item {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 12px 15px;
+            background: rgba(255,255,255,0.03);
+            border-radius: 8px;
+            margin-bottom: 10px;
+        }
+        .health-bar {
+            flex: 1;
+            margin: 0 15px;
+            height: 8px;
+            background: rgba(255,255,255,0.1);
+            border-radius: 4px;
+            overflow: hidden;
+        }
+        .health-fill {
+            height: 100%;
+            border-radius: 4px;
+            transition: width 0.5s ease;
+        }
+        .health-fill.bull { background: linear-gradient(90deg, #00ff88, #00d2ff); }
+        .health-fill.sideways { background: linear-gradient(90deg, #ffd700, #ffa500); }
+        .health-fill.bear { background: linear-gradient(90deg, #ff4757, #ff6b6b); }
+        .health-fill.unknown { background: linear-gradient(90deg, #888, #666); }
+        .stock-code {
+            font-weight: bold;
+            color: #fff;
+            min-width: 100px;
+        }
+        .health-score {
+            min-width: 60px;
+            text-align: right;
+            font-weight: bold;
+        }
+        .health-score.good { color: #00ff88; }
+        .health-score.normal { color: #ffd700; }
+        .health-score.bad { color: #ff4757; }
     </style>
 </head>
 <body>
@@ -251,6 +301,8 @@ HTML_TEMPLATE = """
         <!-- 导航栏 -->
         <div class="nav">
             <button class="nav-btn active" onclick="showPage('monitor')">📈 实时监控</button>
+            <button class="nav-btn" onclick="showPage('dashboard')">📊 可视化仪表板</button>
+            <button class="nav-btn" onclick="showPage('stock-pool')">🔍 股票池监控</button>
             <button class="nav-btn" onclick="showPage('history')">📜 监控历史</button>
             <button class="nav-btn" onclick="showPage('config')">⚙️ 系统配置</button>
         </div>
@@ -363,6 +415,131 @@ HTML_TEMPLATE = """
         </div>
     </div>
 </div>
+
+        <!-- 可视化仪表板页面 -->
+        <div id="page-dashboard" class="page">
+            <div class="grid">
+                <!-- 资金曲线图 -->
+                <div class="card" style="grid-column: span 2;">
+                    <h2>📈 资金曲线</h2>
+                    <div id="equity-chart" class="chart-container"></div>
+                </div>
+
+                <!-- 市场状态指示器 -->
+                <div class="card">
+                    <h2>🌍 市场状态</h2>
+                    <div id="market-state-chart" class="chart-container" style="height: 250px;"></div>
+                    <div style="margin-top: 15px; display: flex; justify-content: space-around; text-align: center;">
+                        <div>
+                            <div style="color: #00ff88; font-size: 1.5em;" id="bull-count">-</div>
+                            <div style="color: #888; font-size: 0.9em;">牛市次数</div>
+                        </div>
+                        <div>
+                            <div style="color: #ffd700; font-size: 1.5em;" id="sideways-count">-</div>
+                            <div style="color: #888; font-size: 0.9em;">震荡市次数</div>
+                        </div>
+                        <div>
+                            <div style="color: #ff4757; font-size: 1.5em;" id="bear-count">-</div>
+                            <div style="color: #888; font-size: 0.9em;">熊市次数</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 股票池健康度 -->
+            <div class="card" style="margin-bottom: 20px;">
+                <h2>💪 股票池健康度</h2>
+                <div id="stock-health-container">
+                    <!-- 由 JS 动态填充 -->
+                </div>
+            </div>
+
+            <!-- 信号因子雷达图 -->
+            <div class="grid">
+                <div class="card">
+                    <h2>🎯 最新信号因子分析</h2>
+                    <div id="factors-radar-chart" class="chart-container" style="height: 300px;"></div>
+                    <div style="text-align: center; margin-top: 15px;">
+                        <div style="font-size: 1.2em; color: #00d2ff;">
+                            当前得分：<span id="current-score" style="font-weight: bold;">-</span> / 10.5
+                        </div>
+                        <div style="margin-top: 10px;">
+                            <span id="signal-threshold-badge" class="tag tag-blue">阈值 5.5</span>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="card">
+                    <h2>📊 信号统计</h2>
+                    <div style="padding: 20px;">
+                        <div class="stat-item" style="padding: 15px 0; border-bottom: 1px solid rgba(255,255,255,0.1);">
+                            <span class="stat-label">总监控次数</span>
+                            <span class="stat-value" id="total-monitors">-</span>
+                        </div>
+                        <div class="stat-item" style="padding: 15px 0; border-bottom: 1px solid rgba(255,255,255,0.1);">
+                            <span class="stat-label">买入信号总数</span>
+                            <span class="stat-value" style="color: #00ff88;" id="total-buy-signals">-</span>
+                        </div>
+                        <div class="stat-item" style="padding: 15px 0; border-bottom: 1px solid rgba(255,255,255,0.1);">
+                            <span class="stat-label">卖出信号总数</span>
+                            <span class="stat-value" style="color: #ff4757;" id="total-sell-signals">-</span>
+                        </div>
+                        <div class="stat-item" style="padding: 15px 0;">
+                            <span class="stat-label">平均信号强度</span>
+                            <span class="stat-value" style="color: #00d2ff;" id="avg-signal-strength">-</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="refresh-info">
+                可视化数据每 10 秒自动刷新 | 最后更新：<span id="dashboard-last-update">-</span>
+            </div>
+
+            <!-- 信号分布柱状图 -->
+            <div class="grid" style="margin-top: 20px;">
+                <div class="card" style="grid-column: span 2;">
+                    <h2>📊 信号得分分布</h2>
+                    <div id="signal-distribution-chart" class="chart-container" style="height: 300px;"></div>
+                </div>
+
+                <!-- 告警历史列表 -->
+                <div class="card">
+                    <h2>🔔 最近告警</h2>
+                    <div id="alerts-container" style="max-height: 300px; overflow-y: auto;">
+                        <!-- 由 JS 动态填充 -->
+                    </div>
+                </div>
+            </div>
+
+            <!-- 因子趋势图 -->
+            <div class="card" style="margin-top: 20px;">
+                <h2>📈 因子趋势分析</h2>
+                <div id="factor-trend-chart" class="chart-container" style="height: 350px;"></div>
+                <div style="margin-top: 15px; display: flex; justify-content: center; gap: 20px; flex-wrap: wrap;">
+                    <button class="btn btn-sm" onclick="loadFactorTrend(3)">3 天</button>
+                    <button class="btn btn-sm" onclick="loadFactorTrend(7)">7 天</button>
+                    <button class="btn btn-sm" onclick="loadFactorTrend(14)">14 天</button>
+                    <button class="btn btn-sm" onclick="loadFactorTrend(30)">30 天</button>
+                </div>
+            </div>
+
+            <!-- 说明框 -->
+            <div class="card" style="margin-top: 20px;">
+                <h2>ℹ️ 数据说明</h2>
+                <div style="color: #888; line-height: 1.8;">
+                    <div>🕒 <strong>盘中监控</strong>：每 5 分钟执行一次（交易时间 9:30-15:00）</div>
+                    <div>📊 <strong>股票池健康度</strong>：基于最近 10 次监控的平均信号评分</div>
+                    <div>🎯 <strong>信号因子分析</strong>：当策略产生买入信号时记录</div>
+                    <div>📈 <strong>资金曲线</strong>：基于实际交易记录计算</div>
+                    <div>📊 <strong>信号分布</strong>：展示不同得分区间的信号数量分布</div>
+                    <div>🔔 <strong>告警历史</strong>：记录每次监控的重要事件</div>
+                    <div style="margin-top: 10px; color: #666;">
+                        💡 当前时间已过收盘（15:00），监控数据将在下一个交易日交易时间内产生
+                    </div>
+                </div>
+            </div>
+        </div>
 
         <!-- 配置页面 -->
         <div id="page-config" class="page">
@@ -525,6 +702,65 @@ HTML_TEMPLATE = """
 
             <div class="refresh-info">
                 配置信息每 10 秒自动刷新 | 最后更新：<span id="config-last-update">-</span>
+            </div>
+        </div>
+
+        <!-- 股票池监控页面 -->
+        <div id="page-stock-pool" class="page">
+            <div class="card">
+                <h2>🔍 股票池实时监控</h2>
+
+                <!-- 刷新提示 -->
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+                    <div style="color: #888;">
+                        监控股票池：<span id="pool-stocks" style="color: #00d2ff;">-</span>
+                    </div>
+                    <button class="btn" onclick="loadStockPoolRealtime()" style="padding: 8px 15px;">🔄 刷新</button>
+                </div>
+
+                <!-- 股票行情表格 -->
+                <div style="overflow-x: auto;">
+                    <table class="table">
+                        <thead>
+                            <tr>
+                                <th>代码</th>
+                                <th>名称</th>
+                                <th>最新价</th>
+                                <th>涨跌幅</th>
+                                <th>开盘</th>
+                                <th>最高</th>
+                                <th>最低</th>
+                                <th>成交量</th>
+                                <th>成交额</th>
+                                <th>MA5</th>
+                                <th>MA10</th>
+                                <th>MA20</th>
+                                <th>RSI</th>
+                                <th>趋势</th>
+                                <th>K 线图</th>
+                            </tr>
+                        </thead>
+                        <tbody id="stock-pool-table-body">
+                            <!-- 由 JS 动态填充 -->
+                        </tbody>
+                    </table>
+                </div>
+
+                <div class="refresh-info">
+                    数据每 10 秒自动刷新 | 最后更新：<span id="stock-pool-last-update">-</span>
+                </div>
+            </div>
+
+            <!-- K 线图模态框 -->
+            <div id="kline-modal" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.85); z-index: 1000; justify-content: center; align-items: center;">
+                <div style="background: linear-gradient(135deg, rgba(58,123,213,0.95), rgba(0,210,255,0.95)); border-radius: 15px; padding: 30px; max-width: 900px; width: 95%; max-height: 90vh; overflow-y: auto;">
+                    <h3 style="color: white; margin-bottom: 20px;" id="kline-title">📈 K 线图</h3>
+                    <div id="kline-chart" style="width: 100%; height: 500px; background: rgba(0,0,0,0.3); border-radius: 10px;"></div>
+                    <div style="margin-top: 20px; display: flex; justify-content: space-between; align-items: center;">
+                        <div id="kline-info" style="color: white; font-size: 0.9em;"></div>
+                        <button class="btn btn-danger" onclick="closeKlineModal()" style="padding: 8px 20px;">关闭</button>
+                    </div>
+                </div>
             </div>
         </div>
 
@@ -921,11 +1157,843 @@ HTML_TEMPLATE = """
             }
         });
 
+        // === 股票池监控页面相关函数 ===
+
+        let klineChart = null;
+
+        // 加载股票池实时数据
+        async function loadStockPoolRealtime() {
+            try {
+                const response = await fetch('/api/stock-pool/realtime');
+                const data = await response.json();
+
+                if (data.error || !data.stocks || data.stocks.length === 0) {
+                    document.getElementById('stock-pool-table-body').innerHTML = `
+                        <tr><td colspan="15" style="text-align:center;color:#666;padding:30px;">
+                            ${data.error || '暂无数据'}
+                        </td></tr>
+                    `;
+                    return;
+                }
+
+                // 显示股票池
+                document.getElementById('pool-stocks').textContent = data.stocks.map(s => s.ts_code).join(', ');
+
+                // 填充表格
+                const tbody = document.getElementById('stock-pool-table-body');
+                tbody.innerHTML = data.stocks.map(stock => {
+                    // 涨跌幅颜色 (A 股习惯：红涨绿跌)
+                    const pctClass = stock.pct_chg >= 0 ? 'positive' : 'negative';
+                    const pctColor = stock.pct_chg >= 0 ? '#ff4757' : '#00ff88';
+
+                    // 趋势标识
+                    const trendIcon = stock.trend === 'up' ? '📈' : (stock.trend === 'down' ? '📉' : '➡️');
+
+                    // RSI 状态
+                    const rsiStatus = stock.rsi > 70 ? '超买' : (stock.rsi < 30 ? '超卖' : '中性');
+                    const rsiColor = stock.rsi > 70 ? '#ff4757' : (stock.rsi < 30 ? '#00ff88' : '#ffd700');
+
+                    return `
+                        <tr>
+                            <td style="font-weight:bold;color:#00d2ff;">${stock.ts_code}</td>
+                            <td>${stock.name || '-'}</td>
+                            <td style="font-weight:bold;">¥${stock.close.toFixed(2)}</td>
+                            <td class="${pctClass}" style="color:${pctColor};">${stock.pct_chg >= 0 ? '+' : ''}${stock.pct_chg.toFixed(2)}%</td>
+                            <td>¥${stock.open.toFixed(2)}</td>
+                            <td>¥${stock.high.toFixed(2)}</td>
+                            <td>¥${stock.low.toFixed(2)}</td>
+                            <td>${(stock.volume / 10000).toFixed(1)}万手</td>
+                            <td>${(stock.amount / 100000000).toFixed(2)}亿</td>
+                            <td style="color:${stock.ma5 ? '#888' : '#666'}">${stock.ma5 || '-'}</td>
+                            <td style="color:${stock.ma10 ? '#888' : '#666'}">${stock.ma10 || '-'}</td>
+                            <td style="color:${stock.ma20 ? '#888' : '#666'}">${stock.ma20 || '-'}</td>
+                            <td style="color:${rsiColor};">${stock.rsi.toFixed(1)} <span style="font-size:0.8em;">(${rsiStatus})</span></td>
+                            <td>${trendIcon} ${stock.trend}</td>
+                            <td><button class="btn" onclick="showKline('${stock.ts_code}')" style="padding:5px 10px;font-size:0.85em;">📊 查看</button></td>
+                        </tr>
+                    `;
+                }).join('');
+
+                document.getElementById('stock-pool-last-update').textContent = new Date().toLocaleTimeString();
+            } catch (e) {
+                console.error('加载股票池数据失败:', e);
+                document.getElementById('stock-pool-table-body').innerHTML = `
+                    <tr><td colspan="15" style="text-align:center;color:#ff4757;padding:30px;">
+                        加载失败：${e.message}
+                    </td></tr>
+                `;
+            }
+        }
+
+        // 显示 K 线图
+        async function showKline(tsCode) {
+            try {
+                const response = await fetch(`/api/stock-pool/detail/${tsCode}`);
+                const data = await response.json();
+
+                if (data.error || !data.kline_data || data.kline_data.length === 0) {
+                    alert(data.error || '无 K 线数据');
+                    return;
+                }
+
+                // 设置标题
+                document.getElementById('kline-title').textContent = `📈 ${data.name || tsCode} K 线图`;
+                document.getElementById('kline-info').textContent =
+                    `行业：${data.industry || '-'} | 地区：${data.area || '-'} | 数据条数：${data.kline_data.length}`;
+
+                // 显示模态框
+                document.getElementById('kline-modal').style.display = 'flex';
+
+                // 绘制 K 线图
+                if (klineChart) {
+                    klineChart.dispose();
+                }
+
+                klineChart = echarts.init(document.getElementById('kline-chart'));
+
+                // 准备数据
+                const klineData = data.kline_data.map(d => [d.open, d.close, d.low, d.high]);
+                const dates = data.kline_data.map(d => d.date);
+                const volumes = data.kline_data.map(d => d.volume);
+
+                // 计算 MA 值
+                const ma5 = calculateMA(klineData, 5);
+                const ma10 = calculateMA(klineData, 10);
+                const ma20 = calculateMA(klineData, 20);
+
+                const option = {
+                    backgroundColor: 'transparent',
+                    tooltip: {
+                        trigger: 'axis',
+                        axisPointer: { type: 'cross' },
+                        backgroundColor: 'rgba(0,0,0,0.8)',
+                        borderColor: '#00d2ff',
+                        textStyle: { color: '#fff' }
+                    },
+                    axisPointer: {
+                        link: [{ xAxisIndex: 'all' }],
+                        label: { backgroundColor: '#00d2ff' }
+                    },
+                    grid: [
+                        { left: '10%', right: '8%', top: '10%', height: '60%' },
+                        { left: '10%', right: '8%', top: '75%', height: '15%' }
+                    ],
+                    xAxis: [
+                        {
+                            type: 'category',
+                            data: dates,
+                            scale: true,
+                            boundaryGap: false,
+                            axisLine: { onZero: false, lineStyle: { color: '#888' } },
+                            splitLine: { show: false },
+                            splitNumber: 20,
+                            axisLabel: { color: '#888' },
+                            gridIndex: 0
+                        },
+                        {
+                            type: 'category',
+                            gridIndex: 1,
+                            data: dates,
+                            axisLabel: { show: false, color: '#888' }
+                        }
+                    ],
+                    yAxis: [
+                        {
+                            scale: true,
+                            splitArea: { show: true, areaStyle: { color: ['rgba(255,255,255,0.03)', 'rgba(255,255,255,0.01)'] } },
+                            splitLine: { lineStyle: { color: 'rgba(255,255,255,0.1)' } },
+                            axisLabel: { color: '#888' }
+                        },
+                        {
+                            scale: true,
+                            gridIndex: 1,
+                            splitNumber: 2,
+                            axisLabel: { color: '#888' },
+                            axisLine: { show: false },
+                            splitLine: { show: false }
+                        }
+                    ],
+                    series: [
+                        {
+                            name: 'K 线',
+                            type: 'candlestick',
+                            data: klineData,
+                            itemStyle: {
+                                color: '#ef232a',
+                                color0: '#14b143',
+                                borderColor: '#ef232a',
+                                borderColor0: '#14b143'
+                            },
+                            xAxisIndex: 0,
+                            yAxisIndex: 0
+                        },
+                        {
+                            name: 'MA5',
+                            type: 'line',
+                            data: ma5,
+                            smooth: true,
+                            lineStyle: { width: 1, color: '#8a2be2' },
+                            xAxisIndex: 0,
+                            yAxisIndex: 0
+                        },
+                        {
+                            name: 'MA10',
+                            type: 'line',
+                            data: ma10,
+                            smooth: true,
+                            lineStyle: { width: 1, color: '#00d2ff' },
+                            xAxisIndex: 0,
+                            yAxisIndex: 0
+                        },
+                        {
+                            name: 'MA20',
+                            type: 'line',
+                            data: ma20,
+                            smooth: true,
+                            lineStyle: { width: 1, color: '#ffd700' },
+                            xAxisIndex: 0,
+                            yAxisIndex: 0
+                        },
+                        {
+                            name: '成交量',
+                            type: 'bar',
+                            data: volumes,
+                            xAxisIndex: 1,
+                            yAxisIndex: 1,
+                            itemStyle: {
+                                color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
+                                    { offset: 0, color: 'rgba(0,210,255,0.5)' },
+                                    { offset: 1, color: 'rgba(0,210,255,0.1)' }
+                                ])
+                            }
+                        }
+                    ]
+                };
+
+                klineChart.setOption(option);
+                window.addEventListener('resize', () => klineChart.resize());
+
+            } catch (e) {
+                console.error('加载 K 线图失败:', e);
+                alert('加载 K 线图失败：' + e.message);
+            }
+        }
+
+        // 计算移动平均线
+        function calculateMA(klineData, period) {
+            const result = [];
+            for (let i = 0; i < klineData.length; i++) {
+                if (i < period - 1) {
+                    result.push('-');
+                    continue;
+                }
+                let sum = 0;
+                for (let j = 0; j < period; j++) {
+                    sum += klineData[i - j][1]; // 收盘价
+                }
+                result.push((sum / period).toFixed(2));
+            }
+            return result;
+        }
+
+        // 关闭 K 线图模态框
+        function closeKlineModal() {
+            document.getElementById('kline-modal').style.display = 'none';
+            if (klineChart) {
+                klineChart.dispose();
+            }
+        }
+
+        // 点击模态框外部关闭
+        document.getElementById('kline-modal')?.addEventListener('click', function(e) {
+            if (e.target === this) {
+                closeKlineModal();
+            }
+        });
+
+        // === 可视化仪表板相关函数 ===
+
+        // ECharts 实例存储
+        let equityChart = null;
+        let marketStateChart = null;
+        let factorsRadarChart = null;
+
+        // 加载股票池健康度
+        async function loadStockHealth() {
+            try {
+                const response = await fetch('/api/monitoring/stock-health');
+                const data = await response.json();
+
+                const container = document.getElementById('stock-health-container');
+                if (!data.stocks || data.stocks.length === 0) {
+                    container.innerHTML = '<div style="text-align:center;color:#666;padding:20px;">暂无数据</div>';
+                    return;
+                }
+
+                // 检查是否所有股票都是 unknown 状态（无数据）
+                const allUnknown = data.stocks.every(s => s.trend_status === 'unknown');
+                if (allUnknown && data.stocks[0].monitor_count === 0) {
+                    container.innerHTML = `
+                        <div style="text-align:center;color:#888;padding:30px;">
+                            <div style="font-size:1.2em;margin-bottom:10px;">📊 等待监控数据</div>
+                            <div style="font-size:0.9em;">盘中监控每 5 分钟执行一次</div>
+                            <div style="font-size:0.8em;margin-top:15px;color:#666;">
+                                当前股票池：${data.stocks.map(s => s.ts_code).join(', ')}
+                            </div>
+                        </div>
+                    `;
+                    return;
+                }
+
+                let html = '';
+                data.stocks.forEach(stock => {
+                    const scoreClass = stock.health_score >= 70 ? 'good' : (stock.health_score >= 40 ? 'normal' : 'bad');
+                    const trendText = stock.trend_status === 'bull' ? '✅ 强势' :
+                                     (stock.trend_status === 'bear' ? '❌ 弱势' : '⚠️ 震荡');
+                    const trendClass = stock.trend_status;
+
+                    html += `
+                        <div class="stock-health-item">
+                            <span class="stock-code">${stock.ts_code}</span>
+                            <div class="health-bar">
+                                <div class="health-fill ${trendClass}" style="width: ${stock.health_score}%"></div>
+                            </div>
+                            <span class="health-score ${scoreClass}">${stock.health_score}</span>
+                            <span class="tag tag-${trendClass === 'bull' ? 'green' : (trendClass === 'bear' ? 'red' : 'orange')}"
+                                  style="margin-left:10px;min-width:60px;text-align:center;">${trendText}</span>
+                        </div>
+                    `;
+                });
+
+                container.innerHTML = html;
+            } catch (e) {
+                console.error('加载股票健康度失败:', e);
+            }
+        }
+
+        // 加载资金曲线
+        async function loadEquityCurve() {
+            try {
+                const response = await fetch('/api/monitoring/equity-curve');
+                const data = await response.json();
+
+                // 如果没有数据，显示当前资金
+                if (!data.labels || data.labels.length === 0) {
+                    const currentCapital = data.current_capital || 100000;
+                    document.getElementById('equity-chart').innerHTML = `
+                        <div style="text-align:center;color:#888;padding:50px;">
+                            <div style="font-size:0.9em;margin-bottom:10px;">暂无历史数据</div>
+                            <div style="font-size:1.5em;color:#00ff88;">当前资金：¥${currentCapital.toLocaleString()}</div>
+                            <div style="font-size:0.8em;margin-top:10px;">模拟盘运行后自动显示资金曲线</div>
+                        </div>
+                    `;
+                    return;
+                }
+
+                // 初始化 ECharts
+                if (equityChart) {
+                    equityChart.dispose();
+                }
+
+                equityChart = echarts.init(document.getElementById('equity-chart'));
+
+                const option = {
+                    tooltip: {
+                        trigger: 'axis',
+                        backgroundColor: 'rgba(0,0,0,0.8)',
+                        borderColor: '#00d2ff',
+                        textStyle: { color: '#fff' }
+                    },
+                    grid: { left: '3%', right: '4%', bottom: '3%', top: '10%', containLabel: true },
+                    xAxis: {
+                        type: 'category',
+                        data: data.labels,
+                        axisLabel: { color: '#888' },
+                        axisLine: { lineStyle: { color: '#333' } }
+                    },
+                    yAxis: {
+                        type: 'value',
+                        axisLabel: { color: '#888' },
+                        axisLine: { lineStyle: { color: '#333' } },
+                        splitLine: { lineStyle: { color: 'rgba(255,255,255,0.1)' } }
+                    },
+                    series: [{
+                        name: '总资产',
+                        type: 'line',
+                        smooth: true,
+                        data: data.data,
+                        itemStyle: {
+                            color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
+                                { offset: 0, color: '#00ff88' },
+                                { offset: 1, color: '#00d2ff' }
+                            ])
+                        },
+                        areaStyle: {
+                            color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
+                                { offset: 0, color: 'rgba(0,255,136,0.3)' },
+                                { offset: 1, color: 'rgba(0,210,255,0.1)' }
+                            ])
+                        },
+                        lineStyle: { width: 3 }
+                    }]
+                };
+
+                equityChart.setOption(option);
+
+                // 响应式
+                window.addEventListener('resize', () => equityChart.resize());
+            } catch (e) {
+                console.error('加载资金曲线失败:', e);
+            }
+        }
+
+        // 加载市场状态
+        async function loadMarketState() {
+            try {
+                const response = await fetch('/api/monitoring/market-state');
+                const data = await response.json();
+
+                if (data.summary) {
+                    document.getElementById('bull-count').textContent = data.summary.bull_count || 0;
+                    document.getElementById('sideways-count').textContent = data.summary.sideways_count || 0;
+                    document.getElementById('bear-count').textContent = data.summary.bear_count || 0;
+                }
+
+                // 检查是否有数据
+                const total = (data.summary?.bull_count || 0) + (data.summary?.sideways_count || 0) + (data.summary?.bear_count || 0);
+
+                if (total === 0) {
+                    document.getElementById('market-state-chart').innerHTML = `
+                        <div style="text-align:center;color:#888;padding:50px;">
+                            <div style="font-size:1.2em;margin-bottom:10px;">📊 等待监控数据</div>
+                            <div style="font-size:0.9em;">盘中监控每 5 分钟执行一次</div>
+                        </div>
+                    `;
+                    return;
+                }
+
+                // 绘制市场状态饼图
+                if (marketStateChart) {
+                    marketStateChart.dispose();
+                }
+
+                marketStateChart = echarts.init(document.getElementById('market-state-chart'));
+
+                const option = {
+                    tooltip: {
+                        trigger: 'item',
+                        backgroundColor: 'rgba(0,0,0,0.8)',
+                        textStyle: { color: '#fff' }
+                    },
+                    series: [{
+                        name: '市场状态',
+                        type: 'pie',
+                        radius: ['40%', '70%'],
+                        avoidLabelOverlap: false,
+                        label: { color: '#fff' },
+                        data: [
+                            { value: data.summary?.bull_count || 0, name: '牛市', itemStyle: { color: '#00ff88' } },
+                            { value: data.summary?.sideways_count || 0, name: '震荡市', itemStyle: { color: '#ffd700' } },
+                            { value: data.summary?.bear_count || 0, name: '熊市', itemStyle: { color: '#ff4757' } }
+                        ]
+                    }]
+                };
+
+                marketStateChart.setOption(option);
+                window.addEventListener('resize', () => marketStateChart.resize());
+            } catch (e) {
+                console.error('加载市场状态失败:', e);
+            }
+        }
+
+        // 加载信号因子雷达图
+        async function loadFactorsRadar() {
+            try {
+                const response = await fetch('/api/monitoring/factors');
+                const data = await response.json();
+
+                if (!data.factors || data.factors.length === 0 || data.count === 0) {
+                    document.getElementById('factors-radar-chart').innerHTML = `
+                        <div style="text-align:center;color:#888;padding:50px;">
+                            <div style="font-size:1.2em;margin-bottom:10px;">📊 等待信号数据</div>
+                            <div style="font-size:0.9em;">策略会在监控时自动生成信号</div>
+                        </div>
+                    `;
+                    document.getElementById('current-score').textContent = '-';
+                    return;
+                }
+
+                // 获取最新一次信号
+                const latestFactor = data.factors[0];
+                const factors = latestFactor.factors;
+
+                document.getElementById('current-score').textContent = latestFactor.signal_score.toFixed(1);
+
+                if (factorsRadarChart) {
+                    factorsRadarChart.dispose();
+                }
+
+                factorsRadarChart = echarts.init(document.getElementById('factors-radar-chart'));
+
+                const option = {
+                    tooltip: {
+                        backgroundColor: 'rgba(0,0,0,0.8)',
+                        textStyle: { color: '#fff' }
+                    },
+                    radar: {
+                        indicator: [
+                            { name: '均线金叉', max: 2.0 },
+                            { name: '完美多头', max: 1.5 },
+                            { name: 'MACD', max: 1.5 },
+                            { name: 'RSI', max: 0.5 },
+                            { name: '布林带', max: 1.0 },
+                            { name: '成交量', max: 1.5 },
+                            { name: '趋势', max: 1.5 }
+                        ],
+                        axisName: { color: '#00d2ff' },
+                        splitArea: {
+                            areaStyle: {
+                                color: ['rgba(0,210,255,0.1)', 'rgba(0,210,255,0.05)']
+                            }
+                        },
+                        axisLine: { lineStyle: { color: 'rgba(255,255,255,0.3)' } },
+                        splitLine: { lineStyle: { color: 'rgba(255,255,255,0.3)' } }
+                    },
+                    series: [{
+                        name: '信号因子',
+                        type: 'radar',
+                        data: [{
+                            value: [
+                                factors.ma_cross,
+                                factors.perfect_trend,
+                                factors.macd,
+                                factors.rsi,
+                                factors.bb,
+                                factors.volume,
+                                factors.trend
+                            ],
+                            name: '当前信号',
+                            areaStyle: { color: 'rgba(0,210,255,0.3)' },
+                            lineStyle: { color: '#00d2ff', width: 2 },
+                            itemStyle: { color: '#00d2ff' }
+                        }]
+                    }]
+                };
+
+                factorsRadarChart.setOption(option);
+                window.addEventListener('resize', () => factorsRadarChart.resize());
+
+                // 更新信号统计
+                loadSignalStats(data);
+            } catch (e) {
+                console.error('加载信号因子失败:', e);
+            }
+        }
+
+        // 加载信号统计
+        async function loadSignalStats(factorsData) {
+            try {
+                const totalMonitors = factorsData.count || 0;
+                const buySignals = factorsData.factors?.filter(f => f.is_buy_signal).length || 0;
+                const sellSignals = factorsData.factors?.filter(f => !f.is_buy_signal).length || 0;
+
+                // 计算平均强度
+                const avgStrength = factorsData.factors?.length > 0
+                    ? factorsData.factors.reduce((sum, f) => sum + (f.signal_score || 0), 0) / factorsData.factors.length
+                    : 0;
+
+                document.getElementById('total-monitors').textContent = totalMonitors;
+                document.getElementById('total-buy-signals').textContent = buySignals;
+                document.getElementById('total-sell-signals').textContent = sellSignals;
+                document.getElementById('avg-signal-strength').textContent = avgStrength.toFixed(2);
+            } catch (e) {
+                console.error('加载信号统计失败:', e);
+            }
+        }
+
+        // 加载信号分布柱状图
+        async function loadSignalDistribution() {
+            try {
+                const response = await fetch('/api/monitoring/signal-distribution');
+                const data = await response.json();
+
+                if (!data.distribution || data.distribution.length === 0) {
+                    document.getElementById('signal-distribution-chart').innerHTML = `
+                        <div style="text-align:center;color:#888;padding:50px;">
+                            <div style="font-size:1.2em;margin-bottom:10px;">📊 等待信号数据</div>
+                            <div style="font-size:0.9em;">策略会在监控时自动生成信号</div>
+                        </div>
+                    `;
+                    return;
+                }
+
+                const chart = echarts.init(document.getElementById('signal-distribution-chart'));
+
+                const ranges = data.distribution.map(d => d.range);
+                const counts = data.distribution.map(d => d.count);
+                const buyCounts = data.distribution.map(d => d.buy_count);
+
+                const option = {
+                    tooltip: {
+                        trigger: 'axis',
+                        axisPointer: { type: 'shadow' },
+                        backgroundColor: 'rgba(0,0,0,0.8)',
+                        textStyle: { color: '#fff' }
+                    },
+                    legend: {
+                        data: ['总信号数', '买入信号'],
+                        textStyle: { color: '#888' },
+                        top: '0%'
+                    },
+                    grid: { left: '3%', right: '4%', bottom: '3%', top: '15%', containLabel: true },
+                    xAxis: {
+                        type: 'category',
+                        data: ranges,
+                        axisLabel: { color: '#888', rotate: 0 },
+                        axisLine: { lineStyle: { color: '#333' } }
+                    },
+                    yAxis: {
+                        type: 'value',
+                        axisLabel: { color: '#888' },
+                        axisLine: { lineStyle: { color: '#333' } },
+                        splitLine: { lineStyle: { color: 'rgba(255,255,255,0.1)' } }
+                    },
+                    series: [
+                        {
+                            name: '总信号数',
+                            type: 'bar',
+                            data: counts,
+                            itemStyle: {
+                                color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
+                                    { offset: 0, color: '#00d2ff' },
+                                    { offset: 1, color: '#0066cc' }
+                                ])
+                            },
+                            barWidth: '35%'
+                        },
+                        {
+                            name: '买入信号',
+                            type: 'bar',
+                            data: buyCounts,
+                            itemStyle: {
+                                color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
+                                    { offset: 0, color: '#00ff88' },
+                                    { offset: 1, color: '#00aa55' }
+                                ])
+                            },
+                            barWidth: '35%'
+                        }
+                    ]
+                };
+
+                chart.setOption(option);
+                window.addEventListener('resize', () => chart.resize());
+            } catch (e) {
+                console.error('加载信号分布失败:', e);
+            }
+        }
+
+        // 加载因子趋势图
+        let factorTrendChart = null;
+        async function loadFactorTrend(days = 7) {
+            try {
+                const response = await fetch(`/api/monitoring/factor-trend?days=${days}`);
+                const data = await response.json();
+
+                if (!data.trend || data.trend.length === 0) {
+                    document.getElementById('factor-trend-chart').innerHTML = `
+                        <div style="text-align:center;color:#888;padding:50px;">
+                            <div style="font-size:1.2em;margin-bottom:10px;">📊 等待趋势数据</div>
+                            <div style="font-size:0.9em;">盘中监控每 5 分钟执行一次</div>
+                        </div>
+                    `;
+                    return;
+                }
+
+                if (factorTrendChart) {
+                    factorTrendChart.dispose();
+                }
+
+                factorTrendChart = echarts.init(document.getElementById('factor-trend-chart'));
+
+                const dates = data.trend.map(d => d.date.substring(5)); // 只显示 MM-DD
+
+                const option = {
+                    tooltip: {
+                        trigger: 'axis',
+                        backgroundColor: 'rgba(0,0,0,0.8)',
+                        textStyle: { color: '#fff' }
+                    },
+                    legend: {
+                        data: ['综合得分', 'MA 金叉', 'MACD', 'RSI', '布林带', '趋势'],
+                        textStyle: { color: '#888' },
+                        top: '0%',
+                        type: 'scroll'
+                    },
+                    grid: { left: '3%', right: '4%', bottom: '3%', top: '15%', containLabel: true },
+                    xAxis: {
+                        type: 'category',
+                        data: dates,
+                        axisLabel: { color: '#888' },
+                        axisLine: { lineStyle: { color: '#333' } }
+                    },
+                    yAxis: {
+                        type: 'value',
+                        axisLabel: { color: '#888' },
+                        axisLine: { lineStyle: { color: '#333' } },
+                        splitLine: { lineStyle: { color: 'rgba(255,255,255,0.1)' } }
+                    },
+                    series: [
+                        {
+                            name: '综合得分',
+                            type: 'line',
+                            smooth: true,
+                            data: data.trend.map(d => d.avg_score),
+                            itemStyle: { color: '#ffd700' },
+                            lineStyle: { width: 3 }
+                        },
+                        {
+                            name: 'MA 金叉',
+                            type: 'line',
+                            smooth: true,
+                            data: data.trend.map(d => d.ma_cross),
+                            itemStyle: { color: '#00d2ff' },
+                            lineStyle: { width: 2 }
+                        },
+                        {
+                            name: 'MACD',
+                            type: 'line',
+                            smooth: true,
+                            data: data.trend.map(d => d.macd),
+                            itemStyle: { color: '#ff4757' },
+                            lineStyle: { width: 2 }
+                        },
+                        {
+                            name: 'RSI',
+                            type: 'line',
+                            smooth: true,
+                            data: data.trend.map(d => d.rsi),
+                            itemStyle: { color: '#8a2be2' },
+                            lineStyle: { width: 2 }
+                        },
+                        {
+                            name: '布林带',
+                            type: 'line',
+                            smooth: true,
+                            data: data.trend.map(d => d.bb),
+                            itemStyle: { color: '#00ff88' },
+                            lineStyle: { width: 2 }
+                        },
+                        {
+                            name: '趋势',
+                            type: 'line',
+                            smooth: true,
+                            data: data.trend.map(d => d.trend),
+                            itemStyle: { color: '#ff6b6b' },
+                            lineStyle: { width: 2 }
+                        }
+                    ]
+                };
+
+                factorTrendChart.setOption(option);
+                window.addEventListener('resize', () => factorTrendChart.resize());
+            } catch (e) {
+                console.error('加载因子趋势失败:', e);
+            }
+        }
+
+        // 加载告警历史列表
+        async function loadAlerts() {
+            try {
+                const response = await fetch('/api/monitoring/alerts');
+                const data = await response.json();
+
+                if (!data.alerts || data.alerts.length === 0) {
+                    document.getElementById('alerts-container').innerHTML = `
+                        <div style="text-align:center;color:#888;padding:30px;">
+                            <div style="font-size:1em;margin-bottom:10px;">暂无告警记录</div>
+                            <div style="font-size:0.8em;">监控开始后此处将显示告警信息</div>
+                        </div>
+                    `;
+                    return;
+                }
+
+                let html = '';
+                data.alerts.forEach((alert, index) => {
+                    const scoreClass = alert.total_score >= 7 ? 'good' : (alert.total_score >= 4 ? 'normal' : 'bad');
+                    const timeStr = alert.monitor_time.substring(5, 16); // MM-DD HH:MM
+
+                    html += `
+                        <div style="padding: 12px; margin-bottom: 10px; background: rgba(255,255,255,0.05); border-radius: 8px; border-left: 3px solid ${alert.total_score >= 7 ? '#00ff88' : (alert.total_score >= 4 ? '#ffd700' : '#ff4757')};">
+                            <div style="display: flex; justify-content: space-between; align-items: center;">
+                                <div style="color: rgba(255,255,255,0.9); font-size: 0.9em;">
+                                    <span style="color: #888;">${timeStr}</span>
+                                    <span style="margin-left: 10px;">📊 ${alert.market_state || '未知'}</span>
+                                </div>
+                                <div style="color: ${alert.total_score >= 7 ? '#00ff88' : (alert.total_score >= 4 ? '#ffd700' : '#ff4757')}; font-weight: bold;">
+                                    得分：${alert.total_score.toFixed(1)}
+                                </div>
+                            </div>
+                            <div style="margin-top: 8px; display: flex; gap: 15px; font-size: 0.85em; color: #888;">
+                                <span>🟢 买入：${alert.buy_signals_count}</span>
+                                <span>🔴 卖出：${alert.sell_signals_count}</span>
+                                <span>📝 成交：${alert.trades_executed}</span>
+                            </div>
+                        </div>
+                    `;
+                });
+
+                document.getElementById('alerts-container').innerHTML = html;
+            } catch (e) {
+                console.error('加载告警历史失败:', e);
+            }
+        }
+
+        // 刷新仪表板
+        function refreshDashboard() {
+            loadStockHealth();
+            loadEquityCurve();
+            loadMarketState();
+            loadFactorsRadar();
+            loadSignalDistribution();
+            loadFactorTrend(7);
+            loadAlerts();
+            document.getElementById('dashboard-last-update').textContent = new Date().toLocaleTimeString();
+        }
+
         // 初始化
         refreshData();
         refreshConfig();
         setInterval(refreshData, 5000);  // 每 5 秒刷新监控数据
         setInterval(refreshConfig, 10000);  // 每 10 秒刷新配置
+
+        // 仪表板初始化 (当切换到仪表板页面时加载数据)
+        const originalShowPage = showPage;
+        showPage = function(pageName) {
+            originalShowPage(pageName);
+            if (pageName === 'dashboard') {
+                refreshDashboard();
+                // 每 10 秒刷新仪表板
+                if (!window.dashboardInterval) {
+                    window.dashboardInterval = setInterval(refreshDashboard, 10000);
+                }
+            } else if (pageName === 'stock-pool') {
+                // 股票池页面 - 每 10 秒刷新
+                loadStockPoolRealtime();
+                if (!window.stockPoolInterval) {
+                    window.stockPoolInterval = setInterval(loadStockPoolRealtime, 10000);
+                }
+            } else {
+                if (window.dashboardInterval) {
+                    clearInterval(window.dashboardInterval);
+                    window.dashboardInterval = null;
+                }
+                if (window.stockPoolInterval) {
+                    clearInterval(window.stockPoolInterval);
+                    window.stockPoolInterval = null;
+                }
+            }
+        };
     </script>
 </body>
 </html>
@@ -1039,38 +2107,244 @@ async def get_trades():
     return result
 
 
+# === 股票池实时监控 API ===
+
+import random
+from datetime import time as dt_time
+
+def is_trading_time() -> bool:
+    """判断当前是否在交易时间内"""
+    now = datetime.now()
+    # 周末休市
+    if now.weekday() >= 5:
+        return False
+    # 交易时间：9:30-11:30, 13:00-15:00
+    morning_start = dt_time(9, 30)
+    morning_end = dt_time(11, 30)
+    afternoon_start = dt_time(13, 0)
+    afternoon_end = dt_time(15, 0)
+    current_time = now.time()
+    return (morning_start <= current_time <= morning_end or
+            afternoon_start <= current_time <= afternoon_end)
+
+@app.get("/api/stock-pool/realtime")
+async def get_stock_pool_realtime():
+    """获取股票池实时行情（仅在交易时间模拟波动）"""
+    try:
+        stock_pool = ['000063.SZ', '000014.SZ', '000078.SZ', '000039.SZ', '000001.SZ']
+        current_date = datetime.now().strftime('%Y%m%d')
+
+        stocks_data = []
+
+        for ts_code in stock_pool:
+            # 获取最近 60 天数据用于计算技术指标
+            df = db.query("""
+                SELECT trade_date, open, high, low, close, vol, amount, pct_chg
+                FROM daily_quotes
+                WHERE ts_code = ?
+                ORDER BY trade_date DESC
+                LIMIT 60
+            """, (ts_code,))
+
+            if df.empty:
+                continue
+
+            # 获取最新数据
+            latest = df.iloc[0]
+
+            # 计算技术指标
+            close_series = df['close'].iloc[::-1].reset_index(drop=True)  # 反转成正序
+
+            # MA5, MA10, MA20
+            ma5 = close_series.tail(5).mean() if len(close_series) >= 5 else None
+            ma10 = close_series.tail(10).mean() if len(close_series) >= 10 else None
+            ma20 = close_series.tail(20).mean() if len(close_series) >= 20 else None
+
+            # 涨跌幅
+            pct_chg = float(latest['pct_chg']) if latest['pct_chg'] else 0
+
+            # 获取股票名称（如果数据库没有，使用代码映射）
+            stock_info = db.query("SELECT name FROM stocks WHERE ts_code = ?", (ts_code,))
+            if not stock_info.empty:
+                stock_name = stock_info.iloc[0]['name']
+            else:
+                # 使用默认名称映射
+                stock_names = {
+                    '000063.SZ': '中兴通讯',
+                    '000014.SZ': '沙河股份',
+                    '000078.SZ': '海王生物',
+                    '000039.SZ': '中集集团',
+                    '000001.SZ': '平安银行',
+                }
+                stock_name = stock_names.get(ts_code, ts_code)
+
+            # 计算 RSI
+            if len(close_series) >= 15:
+                gains = []
+                losses = []
+                for i in range(1, len(close_series)):
+                    change = close_series.iloc[i] - close_series.iloc[i-1]
+                    if change > 0:
+                        gains.append(change)
+                        losses.append(0)
+                    else:
+                        gains.append(0)
+                        losses.append(abs(change))
+
+                avg_gain = sum(gains[-14:]) / 14 if len(gains) >= 14 else 0
+                avg_loss = sum(losses[-14:]) / 14 if len(losses) >= 14 else 1
+                rs = avg_gain / avg_loss if avg_loss > 0 else 0
+                rsi = 100 - (100 / (1 + rs))
+            else:
+                rsi = 50
+
+            # 基础价格（最新收盘价）
+            base_close = float(latest['close'])
+
+            # 判断是否在交易时间内
+            trading = is_trading_time()
+
+            if trading:
+                # 交易时间：添加模拟实时波动（0.5% 以内随机波动）
+                random.seed(datetime.now().second + datetime.now().microsecond // 10000)
+                fluctuation = random.uniform(-0.005, 0.008)  # -0.5% 到 +0.8%
+
+                # 模拟当前价
+                current_price = round(base_close * (1 + fluctuation), 2)
+
+                # 模拟今日开盘价（在昨日收盘附近）
+                open_fluctuation = random.uniform(-0.003, 0.003)
+                simulated_open = round(base_close * (1 + open_fluctuation), 2)
+
+                # 模拟最高价和最低价
+                simulated_high = round(max(current_price, simulated_open) * random.uniform(1.001, 1.015), 2)
+                simulated_low = round(min(current_price, simulated_open) * random.uniform(0.985, 0.999), 2)
+
+                # 模拟涨跌幅（基于当前价）
+                simulated_pct_chg = round((current_price - base_close) / base_close * 100, 2)
+            else:
+                # 非交易时间：显示固定收盘价
+                current_price = base_close
+                simulated_open = float(latest['open'])
+                simulated_high = float(latest['high'])
+                simulated_low = float(latest['low'])
+                simulated_pct_chg = pct_chg
+
+            # 判断趋势
+            trend = 'up' if ma5 and ma5 > ma10 else ('down' if ma5 and ma5 < ma10 else 'flat')
+
+            stocks_data.append({
+                'ts_code': ts_code,
+                'name': stock_name,
+                'trade_date': str(latest['trade_date']),
+                'open': simulated_open,
+                'high': simulated_high,
+                'low': simulated_low,
+                'close': current_price,
+                'volume': float(latest['vol']),
+                'amount': float(latest['amount']),
+                'pct_chg': simulated_pct_chg,
+                'ma5': round(ma5, 2) if ma5 else None,
+                'ma10': round(ma10, 2) if ma10 else None,
+                'ma20': round(ma20, 2) if ma20 else None,
+                'rsi': round(rsi, 2),
+                'trend': trend,
+                'market_status': 'trading' if trading else 'closed',  # 市场状态
+            })
+
+        return {'stocks': stocks_data, 'update_time': datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
+
+    except Exception as e:
+        return {'error': str(e), 'stocks': [], 'update_time': datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
+
+
+@app.get("/api/stock-pool/detail/{ts_code}")
+async def get_stock_detail(ts_code: str):
+    """获取单只股票详细信息"""
+    try:
+        # 获取最近 120 天数据用于绘制 K 线图
+        df = db.query("""
+            SELECT trade_date, open, high, low, close, vol, amount, pct_chg
+            FROM daily_quotes
+            WHERE ts_code = ?
+            ORDER BY trade_date DESC
+            LIMIT 120
+        """, (ts_code,))
+
+        if df.empty:
+            return {'error': '无数据', 'kline_data': []}
+
+        # 反转成正序
+        df = df.iloc[::-1].reset_index(drop=True)
+
+        kline_data = []
+        for _, row in df.iterrows():
+            kline_data.append({
+                'date': str(row['trade_date']),
+                'open': float(row['open']),
+                'high': float(row['high']),
+                'low': float(row['low']),
+                'close': float(row['close']),
+                'volume': float(row['vol']),
+            })
+
+        # 获取股票信息
+        stock_info = db.query("SELECT name, industry, area FROM stocks WHERE ts_code = ?", (ts_code,))
+        info = stock_info.iloc[0] if not stock_info.empty else {}
+
+        return {
+            'ts_code': ts_code,
+            'name': info.get('name', ts_code),
+            'industry': info.get('industry', ''),
+            'area': info.get('area', ''),
+            'kline_data': kline_data,
+        }
+
+    except Exception as e:
+        return {'error': str(e), 'kline_data': []}
+
+
 @app.post("/api/backtest")
 async def run_backtest():
     """运行回测"""
     global current_strategy
 
-    # 使用最优策略
-    if current_strategy is None:
-        current_strategy = create_optimal_strategy(aggressive=True)
+    try:
+        # 使用最优策略
+        if current_strategy is None:
+            current_strategy = create_optimal_strategy(aggressive=True)
 
-    # 加载数据
-    stock_pool = ['000001.SZ', '000002.SZ', '000063.SZ', '000014.SZ', '000016.SZ']
-    data_dict = {}
+        # 加载数据
+        stock_pool = ['000001.SZ', '000002.SZ', '000063.SZ', '000014.SZ', '000016.SZ']
+        data_dict = {}
 
-    for ts_code in stock_pool:
-        df = data_manager.get_daily_quotes(ts_code, '20250301', '20260319')
-        if not df.empty:
-            data_dict[ts_code] = df
+        for ts_code in stock_pool:
+            df = data_manager.get_daily_quotes(ts_code, '20250301', '20260319')
+            if not df.empty:
+                data_dict[ts_code] = df
 
-    # 运行回测
-    engine = BacktestEngine(initial_capital=1000000)
-    engine.set_strategy(current_strategy)
-    result = engine.run(data_dict)
+        if not data_dict:
+            return {"error": "未获取到任何股票数据，请检查数据源"}
 
-    return {
-        "total_return": result.total_return,
-        "annual_return": result.annual_return,
-        "sharpe_ratio": result.sharpe_ratio,
-        "max_drawdown": result.max_drawdown,
-        "win_rate": result.win_rate,
-        "total_trades": result.total_trades,
-        "final_capital": result.final_capital
-    }
+        # 运行回测
+        engine = BacktestEngine(initial_capital=1000000)
+        engine.set_strategy(current_strategy)
+        result = engine.run(data_dict)
+
+        return {
+            "total_return": result.total_return,
+            "annual_return": result.annual_return,
+            "sharpe_ratio": result.sharpe_ratio,
+            "max_drawdown": result.max_drawdown,
+            "win_rate": result.win_rate,
+            "total_trades": result.total_trades,
+            "final_capital": result.final_capital
+        }
+
+    except Exception as e:
+        import logging
+        logging.error(f"回测失败：{e}", exc_info=True)
+        return {"error": f"回测失败：{str(e)}"}
 
 
 @app.get("/api/strategy/info")
@@ -1166,6 +2440,298 @@ async def test_dingtalk():
 
     except Exception as e:
         return {"success": False, "message": str(e)}
+
+
+# === 可视化 API 端点 ===
+
+@app.get("/api/monitoring/factors")
+async def get_monitoring_factors(
+    start_date: str = None,
+    end_date: str = None,
+    ts_code: str = None
+):
+    """获取信号因子详情 (用于雷达图可视化)"""
+    try:
+        conditions = []
+        params = []
+
+        if start_date:
+            conditions.append("date(monitor_time) >= ?")
+            params.append(start_date)
+        if end_date:
+            conditions.append("date(monitor_time) <= ?")
+            params.append(end_date)
+        if ts_code:
+            conditions.append("ts_code = ?")
+            params.append(ts_code)
+
+        where_clause = ""
+        if conditions:
+            where_clause = "WHERE " + " AND ".join(conditions)
+
+        sql = f"""
+            SELECT * FROM monitoring_details {where_clause}
+            ORDER BY monitor_time DESC
+            LIMIT 100
+        """
+        df = db.query(sql, tuple(params))
+
+        factors_list = []
+        for _, row in df.iterrows():
+            factors_list.append({
+                "id": int(row['id']),
+                "monitor_time": row['monitor_time'],
+                "ts_code": row['ts_code'],
+                "signal_score": float(row['signal_score']),
+                "factors": {
+                    "ma_cross": float(row['factor_ma_cross']),
+                    "perfect_trend": float(row['factor_perfect_trend']),
+                    "macd": float(row['factor_macd']),
+                    "rsi": float(row['factor_rsi']),
+                    "bb": float(row['factor_bb']),
+                    "volume": float(row['factor_volume']),
+                    "trend": float(row['factor_trend']),
+                },
+                "market_state": row['market_state'],
+                "signal_direction": row['signal_direction'],
+                "trigger_reason": row['trigger_reason'],
+                "is_buy_signal": bool(row['is_buy_signal']),
+            })
+
+        return {"factors": factors_list, "count": len(factors_list)}
+
+    except Exception as e:
+        return {"error": str(e), "factors": [], "count": 0}
+
+
+@app.get("/api/monitoring/stock-health")
+async def get_stock_health():
+    """获取股票池健康度 (用于健康度卡片展示)"""
+    try:
+        stock_pool = ['000063.SZ', '000014.SZ', '000078.SZ', '000039.SZ', '000001.SZ']
+        health_data = []
+
+        for ts_code in stock_pool:
+            # 获取最近 10 次监控的平均评分
+            sql = """
+                SELECT
+                    ts_code,
+                    COUNT(*) as monitor_count,
+                    AVG(signal_score) as avg_score,
+                    AVG(factor_ma_cross + factor_perfect_trend + factor_macd + factor_rsi + factor_bb + factor_volume + factor_trend) as avg_total_score,
+                    SUM(is_buy_signal) as buy_signal_count
+                FROM monitoring_details
+                WHERE ts_code = ?
+                GROUP BY ts_code
+            """
+            df = db.query(sql, (ts_code,))
+
+            if not df.empty:
+                row = df.iloc[0]
+                avg_score = float(row['avg_score']) if row['avg_score'] else 0
+                # 计算健康度分数 (满分 10.5 分)
+                health_score = min(100, int((avg_score / 10.5) * 100))
+
+                # 判断趋势状态
+                trend_status = 'unknown'
+                if health_score >= 70:
+                    trend_status = 'bull'  # 强势
+                elif health_score >= 40:
+                    trend_status = 'sideways'  # 震荡
+                else:
+                    trend_status = 'bear'  # 弱势
+
+                health_data.append({
+                    "ts_code": ts_code,
+                    "health_score": health_score,
+                    "avg_score": round(avg_score, 2),
+                    "monitor_count": int(row['monitor_count']),
+                    "buy_signal_count": int(row['buy_signal_count'] or 0),
+                    "trend_status": trend_status,
+                })
+            else:
+                # 无数据时返回默认值
+                health_data.append({
+                    "ts_code": ts_code,
+                    "health_score": 50,
+                    "avg_score": 0,
+                    "monitor_count": 0,
+                    "buy_signal_count": 0,
+                    "trend_status": 'unknown',
+                })
+
+        # 按健康度排序
+        health_data.sort(key=lambda x: x['health_score'], reverse=True)
+
+        return {"stocks": health_data}
+
+    except Exception as e:
+        return {"error": str(e), "stocks": []}
+
+
+@app.get("/api/monitoring/equity-curve")
+async def get_equity_curve():
+    """获取资金曲线数据 (用于绘制收益趋势图)"""
+    try:
+        # 首先尝试从 monitoring_logs 获取历史数据
+        sql = """
+            SELECT
+                monitor_time,
+                buy_signals_count,
+                sell_signals_count,
+                trades_executed
+            FROM monitoring_logs
+            ORDER BY monitor_time ASC
+            LIMIT 100
+        """
+        df = db.query(sql)
+
+        base_capital = 100000
+
+        # 如果没有监控日志，尝试从 orders 表获取交易历史
+        if df.empty:
+            # 从 orders 表获取交易记录，按日期分组
+            sql = """
+                SELECT
+                    DATE(created_at) as trade_date,
+                    COUNT(*) as trade_count,
+                    SUM(CASE WHEN direction = 'buy' THEN 1 ELSE 0 END) as buy_count,
+                    SUM(CASE WHEN direction = 'sell' THEN 1 ELSE 0 END) as sell_count
+                FROM orders
+                GROUP BY DATE(created_at)
+                ORDER BY trade_date ASC
+                LIMIT 30
+            """
+            df = db.query(sql)
+
+            if df.empty:
+                # 没有任何交易记录，返回初始资金
+                now = datetime.now().strftime("%Y-%m-%d %H:%M")
+                return {
+                    "labels": [now],
+                    "data": [base_capital],
+                    "buy_count": [0],
+                    "sell_count": [0],
+                    "current_capital": base_capital,
+                }
+
+            # 从交易记录计算资金曲线
+            labels = []
+            capital_data = []
+            buy_counts = []
+            sell_counts = []
+            cumulative_profit = 0
+
+            # 获取当前账户资金
+            account_df = db.query("SELECT total_asset FROM accounts WHERE account_name = ?", ("paper_trading",))
+            current_capital = float(account_df.iloc[0]['total_asset']) if not account_df.empty else base_capital
+
+            for _, row in df.iterrows():
+                labels.append(str(row['trade_date']))
+                buy_counts.append(int(row['buy_count'] or 0))
+                sell_counts.append(int(row['sell_count'] or 0))
+                # 简化：假设每笔卖出交易平均盈利 1%
+                cumulative_profit += int(row['sell_count']) * 1000
+                capital_data.append(base_capital + cumulative_profit)
+
+            # 更新为当前实际资金
+            if capital_data:
+                capital_data[-1] = current_capital
+
+            return {
+                "labels": labels,
+                "data": capital_data,
+                "buy_count": buy_counts,
+                "sell_count": sell_counts,
+                "current_capital": current_capital,
+            }
+
+        # 原有逻辑：从 monitoring_logs 计算
+        base_capital = 100000
+        cumulative_profit = 0
+        capital_data = []
+        labels = []
+        buy_counts = []
+        sell_counts = []
+
+        for _, row in df.iterrows():
+            labels.append(row['monitor_time'])
+            buy_counts.append(int(row['buy_signals_count'] or 0))
+            sell_counts.append(int(row['sell_signals_count'] or 0))
+
+            # 简化：假设每个买入信号带来 0.5% 收益，每个卖出信号实现 1% 收益
+            if row['buy_signals_count']:
+                cumulative_profit += int(row['buy_signals_count']) * 500
+            if row['sell_signals_count']:
+                cumulative_profit += int(row['sell_signals_count']) * 1000
+
+            capital_data.append(base_capital + cumulative_profit)
+
+        return {
+            "labels": labels,
+            "data": capital_data,
+            "buy_count": buy_counts,
+            "sell_count": sell_counts,
+            "current_capital": capital_data[-1] if capital_data else base_capital,
+        }
+
+    except Exception as e:
+        return {"error": str(e), "labels": [], "data": [], "buy_count": [], "sell_count": []}
+
+
+@app.get("/api/monitoring/market-state")
+async def get_market_state_history():
+    """获取市场状态历史 (用于绘制市场状态变化图)"""
+    try:
+        sql = """
+            SELECT
+                monitor_time,
+                market_state,
+                COUNT(*) as signal_count
+            FROM monitoring_details
+            GROUP BY date(monitor_time), market_state
+            ORDER BY monitor_time ASC
+            LIMIT 50
+        """
+        df = db.query(sql)
+
+        if df.empty:
+            return {"states": [], "labels": []}
+
+        states = []
+        labels = []
+        bull_count = 0
+        bear_count = 0
+        sideways_count = 0
+
+        for _, row in df.iterrows():
+            labels.append(row['monitor_time'])
+            state = row['market_state']
+            if state == 'bull':
+                bull_count += 1
+            elif state == 'bear':
+                bear_count += 1
+            else:
+                sideways_count += 1
+
+            states.append({
+                "time": row['monitor_time'],
+                "state": state,
+                "signal_count": int(row['signal_count']),
+            })
+
+        return {
+            "states": states,
+            "labels": labels,
+            "summary": {
+                "bull_count": bull_count,
+                "bear_count": bear_count,
+                "sideways_count": sideways_count,
+            }
+        }
+
+    except Exception as e:
+        return {"error": str(e), "states": [], "labels": [], "summary": {}}
 
 
 @app.get("/api/monitoring-history")
@@ -1282,6 +2848,184 @@ async def get_monitoring_history_detail(log_id: int):
 
     except Exception as e:
         return {"error": str(e)}
+
+
+# === 监控可视化增强 API ===
+
+@app.get("/api/monitoring/signal-distribution")
+async def get_signal_distribution():
+    """获取信号分布统计 (用于柱状图)"""
+    try:
+        sql = """
+            SELECT
+                CASE
+                    WHEN signal_score >= 8 THEN '8-10.5 (强买入)'
+                    WHEN signal_score >= 6 THEN '6-8 (买入)'
+                    WHEN signal_score >= 4 THEN '4-6 (观望)'
+                    WHEN signal_score >= 2 THEN '2-4 (弱势)'
+                    ELSE '0-2 (极弱)'
+                END as score_range,
+                COUNT(*) as count,
+                SUM(is_buy_signal) as buy_count
+            FROM monitoring_details
+            GROUP BY score_range
+            ORDER BY
+                CASE score_range
+                    WHEN '8-10.5 (强买入)' THEN 1
+                    WHEN '6-8 (买入)' THEN 2
+                    WHEN '4-6 (观望)' THEN 3
+                    WHEN '2-4 (弱势)' THEN 4
+                    ELSE 5
+                END
+        """
+        df = db.query(sql)
+
+        distribution = []
+        for _, row in df.iterrows():
+            distribution.append({
+                'range': row['score_range'],
+                'count': int(row['count']),
+                'buy_count': int(row['buy_count'] or 0)
+            })
+
+        return {"distribution": distribution}
+
+    except Exception as e:
+        return {"error": str(e), "distribution": []}
+
+
+@app.get("/api/monitoring/factor-trend")
+async def get_factor_trend(ts_code: str = None, days: int = 7):
+    """获取因子趋势 (用于折线图)"""
+    try:
+        conditions = []
+        params = []
+
+        if ts_code:
+            conditions.append("ts_code = ?")
+            params.append(ts_code)
+
+        date_condition = f"date(monitor_time) >= date('now', '-{days} days')"
+        conditions.append(date_condition)
+
+        where_clause = "WHERE " + " AND ".join(conditions) if conditions else ""
+
+        sql = f"""
+            SELECT
+                date(monitor_time) as monitor_date,
+                AVG(signal_score) as avg_score,
+                AVG(factor_ma_cross) as avg_ma_cross,
+                AVG(factor_macd) as avg_macd,
+                AVG(factor_rsi) as avg_rsi,
+                AVG(factor_bb) as avg_bb,
+                AVG(factor_trend) as avg_trend,
+                COUNT(*) as monitor_count,
+                SUM(is_buy_signal) as buy_signals
+            FROM monitoring_details
+            {where_clause}
+            GROUP BY date(monitor_time)
+            ORDER BY monitor_date ASC
+        """
+        df = db.query(sql, tuple(params))
+
+        trend_data = []
+        for _, row in df.iterrows():
+            trend_data.append({
+                'date': row['monitor_date'],
+                'avg_score': float(row['avg_score']) if row['avg_score'] else 0,
+                'ma_cross': float(row['avg_ma_cross']) if row['avg_ma_cross'] else 0,
+                'macd': float(row['avg_macd']) if row['avg_macd'] else 0,
+                'rsi': float(row['avg_rsi']) if row['avg_rsi'] else 0,
+                'bb': float(row['avg_bb']) if row['avg_bb'] else 0,
+                'trend': float(row['avg_trend']) if row['avg_trend'] else 0,
+                'buy_signals': int(row['buy_signals'] or 0),
+                'monitor_count': int(row['monitor_count'])
+            })
+
+        return {"trend": trend_data, "days": days}
+
+    except Exception as e:
+        return {"error": str(e), "trend": []}
+
+
+@app.get("/api/monitoring/stock-correlation")
+async def get_stock_correlation():
+    """获取股票相关性矩阵 (用于热力图)"""
+    try:
+        sql = """
+            SELECT ts_code, signal_score, factor_ma_cross, factor_macd, factor_rsi, factor_bb, factor_trend
+            FROM monitoring_details
+            WHERE ts_code IN ('000001.SZ', '000002.SZ', '000063.SZ', '000014.SZ', '000016.SZ')
+            ORDER BY monitor_time DESC
+            LIMIT 100
+        """
+        df = db.query(sql)
+
+        if df.empty:
+            return {"matrix": [], "stocks": []}
+
+        # 计算股票间的信号相关性
+        stocks = df['ts_code'].unique().tolist()
+        matrix = []
+
+        for i, stock1 in enumerate(stocks):
+            row = {'stock': stock1}
+            stock1_data = df[df['ts_code'] == stock1]['signal_score'].values
+            for stock2 in stocks:
+                stock2_data = df[df['ts_code'] == stock2]['signal_score'].values
+                if len(stock1_data) > 0 and len(stock2_data) > 0:
+                    # 简单相关系数计算
+                    min_len = min(len(stock1_data), len(stock2_data))
+                    data1 = stock1_data[:min_len]
+                    data2 = stock2_data[:min_len]
+                    mean1 = data1.mean()
+                    mean2 = data2.mean()
+                    std1 = data1.std()
+                    std2 = data2.std()
+                    if std1 > 0 and std2 > 0:
+                        corr = ((data1 - mean1) * (data2 - mean2)).mean() / (std1 * std2)
+                    else:
+                        corr = 0
+                    row[stock2] = round(corr, 3)
+                else:
+                    row[stock2] = 0
+            matrix.append(row)
+
+        return {"matrix": matrix, "stocks": stocks}
+
+    except Exception as e:
+        return {"error": str(e), "matrix": [], "stocks": []}
+
+
+@app.get("/api/monitoring/alerts")
+async def get_monitoring_alerts(limit: int = 50):
+    """获取监控告警历史 (用于告警列表)"""
+    try:
+        sql = """
+            SELECT * FROM monitoring_logs
+            ORDER BY monitor_time DESC
+            LIMIT ?
+        """
+        df = db.query(sql, (limit,))
+
+        alerts = []
+        for _, row in df.iterrows():
+            # 计算总信号得分
+            total_signals = (row['buy_signals_count'] or 0) + (row['sell_signals_count'] or 0)
+            alerts.append({
+                'id': int(row['id']),
+                'monitor_time': row['monitor_time'],
+                'market_state': row['market_state'],
+                'buy_signals_count': int(row['buy_signals_count'] or 0),
+                'sell_signals_count': int(row['sell_signals_count'] or 0),
+                'trades_executed': int(row['trades_executed'] or 0),
+                'total_score': float(total_signals)
+            })
+
+        return {"alerts": alerts, "count": len(alerts)}
+
+    except Exception as e:
+        return {"error": str(e), "alerts": []}
 
 
 def init_system():

@@ -41,6 +41,32 @@ class RiskLimits:
     base_volatility: float = 0.02  # 基准波动率 (2%)
     volatility_scaling: float = 0.5  # 波动率缩放因子
 
+    # ========== 实盘风控增强参数 ==========
+    # 价格异常检测
+    max_price_change_ratio: float = 0.10  # 单日最大涨跌幅限制 10%
+    price_anomaly_threshold: float = 0.03  # 价格异常波动阈值 3%
+
+    # 涨跌停过滤
+    limit_up_check_enabled: bool = True  # 启用涨跌停检查
+    limit_up_buffer: float = 0.02  # 涨停板缓冲 2%
+
+    # 流动性检测
+    min_daily_volume: int = 100000  # 最小日成交量（手）
+    min_daily_amount: float = 10000000  # 最小日成交额（元）
+    volume_ratio_threshold: float = 0.5  # 量比阈值
+
+    # 交易时段限制
+    avoid_call_auction: bool = True  # 避免集合竞价
+    morning_start_time: str = "09:35"  # 上午开始交易时间（避开集合竞价）
+    afternoon_end_time: str = "14:55"  # 下午结束交易时间（避开尾盘）
+
+    # 订单确认
+    large_order_threshold: float = 50000  # 大额订单阈值（元）
+    large_order_confirmation: bool = True  # 大额订单需要二次确认
+
+    # 实盘模式标志
+    real_trading_mode: bool = False  # 实盘模式开关
+
 
 @dataclass
 class RiskMetrics:
@@ -225,6 +251,210 @@ class RiskController:
         adjustment = max(0.5, min(1.5, adjustment))
 
         return adjustment
+
+    # ========== 实盘风控增强方法 ==========
+
+    def enable_real_trading_mode(self, enabled: bool = True):
+        """
+        启用/禁用实盘模式
+
+        Args:
+            enabled: 是否启用实盘模式
+        """
+        self.limits.real_trading_mode = enabled
+        if enabled:
+            trader_logger.info("实盘风控模式已启用")
+        else:
+            trader_logger.info("已切换至模拟风控模式")
+
+    def check_trading_time(self) -> Tuple[bool, str]:
+        """
+        检查当前是否在允许交易的时间段内
+
+        Returns:
+            (是否允许交易，原因) 元组
+        """
+        if not self.limits.avoid_call_auction:
+            return True, ""
+
+        from datetime import time as dt_time
+        from datetime import datetime
+
+        now = datetime.now()
+        current_time = now.time()
+
+        # 解析时间配置
+        morning_parts = self.limits.morning_start_time.split(':')
+        morning_start = dt_time(int(morning_parts[0]), int(morning_parts[1]))
+
+        afternoon_parts = self.limits.afternoon_end_time.split(':')
+        afternoon_end = dt_time(int(afternoon_parts[0]), int(afternoon_parts[1]))
+
+        # 检查是否在允许的交易时间段
+        if current_time < morning_start:
+            return False, f"集合竞价时段禁止交易（早于 {self.limits.morning_start_time}）"
+
+        if current_time > afternoon_end:
+            return False, f"尾盘时段禁止交易（晚于 {self.limits.afternoon_end_time}）"
+
+        return True, "交易时段正常"
+
+    def check_price_anomaly(
+        self,
+        ts_code: str,
+        current_price: float,
+        prev_close: float,
+        realtime_volatility: Optional[float] = None
+    ) -> Tuple[bool, str]:
+        """
+        检查价格异常
+
+        Args:
+            ts_code: 股票代码
+            current_price: 当前价格
+            prev_close: 昨收价
+            realtime_volatility: 实时波动率
+
+        Returns:
+            (是否通过，原因) 元组
+        """
+        if prev_close <= 0:
+            return True, ""
+
+        # 计算涨跌幅
+        price_change = (current_price - prev_close) / prev_close
+
+        # 检查是否接近涨跌停
+        if self.limits.limit_up_check_enabled:
+            limit_up_threshold = 1.0 - self.limits.limit_up_buffer
+            limit_down_threshold = -1.0 + self.limits.limit_up_buffer
+
+            if price_change > limit_up_threshold:
+                return False, f"接近涨停，禁止买入：{price_change*100:.2f}%"
+            if price_change < limit_down_threshold and realtime_volatility:
+                # 跌停时如果有异常波动，禁止交易
+                return False, f"接近跌停且波动异常：{price_change*100:.2f}%"
+
+        # 检查异常波动
+        if abs(price_change) > self.limits.price_anomaly_threshold:
+            trader_logger.warning(f"{ts_code} 价格异常波动：{price_change*100:.2f}%")
+
+        return True, "价格正常"
+
+    def check_liquidity(
+        self,
+        ts_code: str,
+        daily_volume: int,
+        daily_amount: float,
+        order_volume: int,
+        order_value: float
+    ) -> Tuple[bool, str]:
+        """
+        检查流动性
+
+        Args:
+            ts_code: 股票代码
+            daily_volume: 日成交量（手）
+            daily_amount: 日成交额（元）
+            order_volume: 订单数量
+            order_value: 订单金额
+
+        Returns:
+            (是否通过，原因) 元组
+        """
+        # 检查最小成交量
+        if daily_volume < self.limits.min_daily_volume:
+            return False, f"成交量过低：{daily_volume} < {self.limits.min_daily_volume}手"
+
+        # 检查最小成交额
+        if daily_amount < self.limits.min_daily_amount:
+            return False, f"成交额过低：{daily_amount:.2f} < {self.limits.min_daily_amount:.2f}元"
+
+        # 检查订单占成交量比例（避免过大冲击）
+        if daily_volume > 0:
+            order_ratio = order_volume / daily_volume
+            if order_ratio > 0.05:  # 订单超过日成交量 5%
+                return False, f"订单过大，可能产生较大冲击：{order_ratio*100:.2f}%"
+
+        return True, "流动性正常"
+
+    def check_large_order(
+        self,
+        order_value: float
+    ) -> Tuple[bool, str]:
+        """
+        检查大额订单
+
+        Args:
+            order_value: 订单金额
+
+        Returns:
+            (是否通过，原因) 元组
+        """
+        if not self.limits.large_order_confirmation:
+            return True, ""
+
+        if order_value >= self.limits.large_order_threshold:
+            return False, f"大额订单需要二次确认：{order_value:.2f} >= {self.limits.large_order_threshold:.2f}"
+
+        return True, "订单金额正常"
+
+    def check_order_real_trading(
+        self,
+        ts_code: str,
+        direction: str,
+        price: float,
+        volume: int,
+        market_data: Optional[Dict] = None
+    ) -> Tuple[bool, str]:
+        """
+        实盘模式下的订单检查（整合所有实盘风控检查）
+
+        Args:
+            ts_code: 股票代码
+            direction: 买卖方向
+            price: 当前价格
+            volume: 数量
+            market_data: 市场数据（包含 prev_close, daily_volume, daily_amount 等）
+
+        Returns:
+            (是否通过，原因) 元组
+        """
+        if not self.limits.real_trading_mode:
+            return True, "模拟模式，跳过实盘检查"
+
+        # 1. 检查交易时间
+        time_ok, time_reason = self.check_trading_time()
+        if not time_ok:
+            return False, time_reason
+
+        # 2. 检查价格异常
+        if market_data:
+            prev_close = market_data.get('prev_close', price)
+            price_ok, price_reason = self.check_price_anomaly(
+                ts_code, price, prev_close
+            )
+            if not price_ok:
+                return False, price_reason
+
+            # 3. 检查流动性
+            daily_volume = market_data.get('daily_volume', 0)
+            daily_amount = market_data.get('daily_amount', 0)
+            liquidity_ok, liquidity_reason = self.check_liquidity(
+                ts_code, daily_volume, daily_amount, volume, price * volume
+            )
+            if not liquidity_ok:
+                return False, liquidity_reason
+
+        # 4. 检查大额订单
+        order_value = price * volume
+        large_order_ok, large_order_reason = self.check_large_order(order_value)
+        if not large_order_ok:
+            return False, large_order_reason
+
+        return True, "通过实盘风控检查"
+
+    # ========== 原有方法 ==========
 
     def check_order(
         self,

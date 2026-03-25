@@ -20,7 +20,16 @@
       "Bash(findstr :8801)",
       "Bash(taskkill:*)",
       "Bash(findstr LISTENING)",
-      "Bash(powershell -Command \"taskkill /F /PID 33152\")"
+      "Bash(powershell -Command \"taskkill /F /PID 33152\")",
+      "Bash(iconv -f gbk -t utf-8)",
+      "Bash(timeout 3)",
+      "Bash(winpty taskkill:*)",
+      "Bash(powershell \"Stop-Process -Id 32024 -Force\")",
+      "Bash(tasklist:*)",
+      "Bash(findstr python:*)",
+      "Bash(Stop-Process -Id 32652 -Force)",
+      "Bash(pkill -f \"python.*web_server.py\")",
+      "Bash(sqlite3:*)"
     ]
   }
 }

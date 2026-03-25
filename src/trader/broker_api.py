@@ -287,34 +287,73 @@ class RealBroker(BaseBroker):
     """
     实盘交易券商接口
 
-    需要根据实际券商 API 实现
-    此处提供接口框架
+    整合 easytrader 实现，支持多种券商接入
     """
 
-    def __init__(self, broker_config: Dict = None):
+    def __init__(
+        self,
+        broker_type: str = "huatai",
+        config_path: Optional[str] = None,
+        use_easytrader: bool = True
+    ):
         """
         初始化实盘券商
 
         Args:
-            broker_config: 券商配置
+            broker_type: 券商类型 (huatai/yinhai/guojin/cicc 等)
+            config_path: 配置文件路径 (JSON 格式)
+            use_easytrader: 是否使用 easytrader(默认 True)
         """
-        self.config = broker_config or {}
+        self.broker_type = broker_type
+        self.config_path = config_path
+        self.use_easytrader = use_easytrader
+
         self.connected = False
         self.client = None
+        self.risk_controller = None
+
+        # 订单管理器（用于本地记录）
+        self.order_manager = None
 
     def connect(self) -> bool:
         """连接实盘券商"""
-        # TODO: 实现实际券商的连接逻辑
-        # 不同券商有不同的 API
-        trader_logger.warning("实盘接口需要用户自行对接券商 API")
-        return False
+        try:
+            if self.use_easytrader:
+                # 使用 easytrader 连接
+                from src.trader.easytrader_broker import EasyTraderBroker
+
+                self.client = EasyTraderBroker(
+                    broker_type=self.broker_type,
+                    config_path=self.config_path
+                )
+
+                if self.client.connect():
+                    self.connected = True
+                    self.risk_controller = RiskController()
+                    trader_logger.info(f"实盘券商连接成功：{self.broker_type}")
+                    return True
+                else:
+                    trader_logger.error("实盘券商连接失败")
+                    return False
+            else:
+                # 自定义券商接口（用户可自行扩展）
+                trader_logger.warning("自定义券商接口需要自行实现")
+                return False
+
+        except ImportError as e:
+            trader_logger.error(f"easytrader 未安装：{e}")
+            trader_logger.info("请运行：pip install easytrader")
+            return False
+        except Exception as e:
+            trader_logger.error(f"连接实盘券商异常：{e}")
+            return False
 
     def disconnect(self):
         """断开连接"""
-        if self.client:
-            # TODO: 断开连接
-            pass
+        if self.client and hasattr(self.client, 'disconnect'):
+            self.client.disconnect()
         self.connected = False
+        trader_logger.info("实盘券商已断开连接")
 
     def is_connected(self) -> bool:
         """是否已连接"""
@@ -324,48 +363,139 @@ class RealBroker(BaseBroker):
         """获取账户信息"""
         if not self.connected:
             return {}
-        # TODO: 实现
+
+        if self.client:
+            return self.client.get_account_info()
         return {}
 
     def get_positions(self) -> List[Dict]:
         """获取持仓"""
         if not self.connected:
             return []
-        # TODO: 实现
+
+        if self.client:
+            return self.client.get_positions()
         return []
 
-    def get_orders(self) -> List[Dict]:
+    def get_orders(self, status: Optional[str] = None) -> List[Dict]:
         """获取订单"""
         if not self.connected:
             return []
-        # TODO: 实现
+
+        if self.client and hasattr(self.client, 'get_orders'):
+            return self.client.get_orders(status)
         return []
 
-    def submit_order(self, order: Dict) -> Optional[str]:
-        """提交订单"""
+    def submit_order(
+        self,
+        ts_code: str,
+        direction: str,
+        price: float,
+        volume: int,
+        strategy_name: str = ""
+    ) -> Optional[str]:
+        """
+        提交订单
+
+        Args:
+            ts_code: 股票代码
+            direction: 买卖方向
+            price: 价格
+            volume: 数量
+            strategy_name: 策略名称
+
+        Returns:
+            订单 ID
+        """
         if not self.connected:
+            trader_logger.warning("实盘券商未连接")
             return None
-        # TODO: 实现
+
+        if self.client and hasattr(self.client, 'submit_order'):
+            return self.client.submit_order(
+                ts_code=ts_code,
+                direction=direction,
+                price=price,
+                volume=volume,
+                strategy_name=strategy_name
+            )
         return None
 
     def cancel_order(self, order_id: str) -> bool:
         """取消订单"""
         if not self.connected:
             return False
-        # TODO: 实现
+
+        if self.client and hasattr(self.client, 'cancel_order'):
+            return self.client.cancel_order(order_id)
         return False
+
+    def get_trades(self, start_date: Optional[str] = None) -> List[Dict]:
+        """
+        获取成交记录
+
+        Args:
+            start_date: 开始日期 (YYYYMMDD)
+
+        Returns:
+            成交记录列表
+        """
+        if not self.connected:
+            return []
+
+        if self.client and hasattr(self.client, 'get_trades'):
+            return self.client.get_trades(start_date)
+        return []
+
+    def check_stop_loss_take_profit(self) -> List[Dict]:
+        """
+        检查止损止盈
+
+        Returns:
+            需要执行的订单列表
+        """
+        if not self.connected or not self.risk_controller:
+            return []
+
+        sell_orders = []
+        positions = self.get_positions()
+
+        for pos in positions:
+            ts_code = pos['ts_code']
+            triggered, reason = self.risk_controller.check_stop_loss_take_profit(
+                ts_code, pos['current_price'], pos
+            )
+
+            if triggered:
+                trader_logger.info(f"{ts_code}: {reason}")
+                sell_orders.append({
+                    'ts_code': ts_code,
+                    'direction': 'sell',
+                    'price': pos['current_price'],
+                    'volume': pos['volume'],
+                    'reason': reason
+                })
+
+        return sell_orders
 
 
 # 创建模拟券商实例
 paper_broker = PaperBroker()
 
 
-def get_broker(broker_type: str = "paper", **kwargs) -> BaseBroker:
+def get_broker(
+    broker_type: str = "paper",
+    real_broker_type: str = "huatai",
+    config_path: Optional[str] = None,
+    **kwargs
+) -> BaseBroker:
     """
     获取券商实例
 
     Args:
         broker_type: 券商类型 (paper/real)
+        real_broker_type: 实盘券商类型 (huatai/yinhai/guojin 等)
+        config_path: 配置文件路径
         **kwargs: 额外参数
 
     Returns:
@@ -374,6 +504,9 @@ def get_broker(broker_type: str = "paper", **kwargs) -> BaseBroker:
     if broker_type == "paper":
         return PaperBroker(kwargs.get('initial_capital'))
     elif broker_type == "real":
-        return RealBroker(kwargs.get('broker_config'))
+        return RealBroker(
+            broker_type=real_broker_type,
+            config_path=config_path
+        )
     else:
         raise ValueError(f"不支持的券商类型：{broker_type}")

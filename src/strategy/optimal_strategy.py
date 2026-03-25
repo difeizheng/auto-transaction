@@ -491,6 +491,75 @@ class OptimalStrategy(BaseStrategy):
 
         return buy_signal, signal_strength
 
+    def get_signal_factors(
+        self,
+        golden_cross: bool,
+        perfect_trend: bool,
+        macd_bullish: bool,
+        rsi_ok: bool,
+        rsi_oversold: bool,
+        bb_signal: str,
+        volume_ok: bool,
+        trend_ok: bool,
+        current_price: float,
+        ma_short: float,
+        ma_mid: float,
+        ma_long: float
+    ) -> Dict[str, Any]:
+        """
+        获取信号因子详情 (用于可视化)
+
+        Returns:
+            包含各因子得分和详细信息的字典
+        """
+        factors = {
+            'ma_cross': 2.0 if golden_cross else 0.0,
+            'perfect_trend': 1.5 if perfect_trend else 0.0,
+            'macd': 1.5 if macd_bullish else 0.0,
+            'rsi': 0.5 if (rsi_ok or rsi_oversold) else 0.0,
+            'bb': 1.0 if bb_signal == 'lower' else 0.0,
+            'volume': 1.5 if volume_ok else 0.0,
+            'trend': 1.5 if trend_ok else 0.0,
+        }
+
+        total_score = sum(factors.values())
+        max_score = 10.5
+
+        # 确定信号方向
+        signal_direction = 'buy' if (total_score >= self.params.signal_threshold and trend_ok) else 'none'
+
+        # 生成触发原因
+        reasons = []
+        if golden_cross:
+            reasons.append('均线金叉')
+        if perfect_trend:
+            reasons.append('完美多头')
+        if macd_bullish:
+            reasons.append('MACD 多头')
+        if rsi_ok or rsi_oversold:
+            reasons.append('RSI 健康')
+        if bb_signal == 'lower':
+            reasons.append('布林带下轨')
+        if volume_ok:
+            reasons.append('成交量放大')
+        if trend_ok:
+            reasons.append('趋势向上')
+
+        return {
+            'factors': factors,
+            'total_score': total_score,
+            'max_score': max_score,
+            'signal_direction': signal_direction,
+            'trigger_reason': ','.join(reasons) if reasons else '无信号',
+            'threshold': self.params.signal_threshold,
+            'ma_values': {
+                'short': ma_short,
+                'mid': ma_mid,
+                'long': ma_long,
+            },
+            'price': current_price,
+        }
+
     def on_bar(self, data: Dict[str, Any], current_date: str) -> List[Signal]:
         """K 线数据回调 - 恢复原版逻辑"""
         if not self.initialized:
@@ -625,6 +694,14 @@ class OptimalStrategy(BaseStrategy):
                 volume_confirmed, trend_ok, perfect_trend
             )
 
+            # 获取信号因子详情 (用于可视化)
+            signal_factors = self.get_signal_factors(
+                golden_cross, perfect_trend, macd_bullish, rsi_ok, rsi_oversold,
+                bb_signal, volume_confirmed, trend_ok,
+                current_price,
+                ma_short.iloc[-1], ma_mid.iloc[-1], ma_long.iloc[-1]
+            )
+
             # === 生成买入信号 ===
             if buy_signal and ts_code not in self.positions:
                 volume = self.calculate_position_size(ts_code, signal_strength, current_price)
@@ -635,7 +712,9 @@ class OptimalStrategy(BaseStrategy):
                         price=current_price,
                         volume=volume,
                         strength=signal_strength,
-                        reason=f"综合信号 (强度{signal_strength:.1f}, RSI={current_rsi:.0f})"
+                        reason=f"综合信号 (强度{signal_strength:.1f}, RSI={current_rsi:.0f})",
+                        factors=signal_factors,
+                        market_state=self.market_state.value
                     ))
                     # 记录持仓
                     self.positions[ts_code] = {

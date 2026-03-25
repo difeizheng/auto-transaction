@@ -134,18 +134,20 @@ class TradingBot:
             day_of_week='mon-fri'
         )
 
-        # 盘中监控 (每 5 分钟，从下一个整 5 分钟开始)
+        # 盘中监控 (实盘模式：每 1 分钟；模拟模式：每 5 分钟)
         now = datetime.now()
         next_run = now.replace(second=0, microsecond=0)
-        # 计算下一个 5 分钟倍数时间点
-        if next_run.minute % 5 != 0:
-            next_run += timedelta(minutes=(5 - next_run.minute % 5))
+        # 计算下一个整分钟时间点
+        next_run += timedelta(minutes=1)
+
+        # 根据实盘模式调整监控频率
+        monitor_interval = 1 if settings.REAL_TRADING_MODE else 5
 
         self.scheduler.add_job(
             self.intra_market_monitor,
             trigger='interval',
             job_id='intra_market',
-            minutes=5,
+            minutes=monitor_interval,
             start_date=next_run,
             end_date=datetime.now().replace(hour=15, minute=5)
         )
@@ -170,7 +172,7 @@ class TradingBot:
             end_date=datetime.now().replace(hour=15, minute=0)
         )
 
-        trader_logger.info(f"定时任务设置完成，盘中监控下次执行：{next_run}")
+        trader_logger.info(f"定时任务设置完成，盘中监控间隔：{monitor_interval}分钟，下次执行：{next_run}")
 
     def pre_market_prepare(self):
         """盘前准备"""
@@ -225,9 +227,19 @@ class TradingBot:
 
         try:
             if not self.market_open:
-                trader_logger.debug("市场未开盘，跳过监控")
-                log_data["error_message"] = "市场未开盘"
-                self._save_monitoring_log(db, log_data)
+                # 检查是否是交易日的非交易时间（允许记录日志但不执行交易）
+                current_hour = datetime.now().hour
+                is_trading_day = True  # 简化：假设周一到周五都是交易日
+
+                if is_trading_day and 7 <= current_hour <= 17:
+                    # 交易日但非交易时间，仍然记录监控日志
+                    trader_logger.info(f"市场未开盘（当前时间：{monitor_time}），跳过信号生成")
+                    log_data["error_message"] = "非交易时间"
+                    self._save_monitoring_log(db, log_data)
+                else:
+                    trader_logger.debug("市场未开盘，跳过监控")
+                    log_data["error_message"] = "市场未开盘"
+                    self._save_monitoring_log(db, log_data)
                 return
 
             trader_logger.info("=== 盘中监控 ===")
@@ -260,6 +272,9 @@ class TradingBot:
             signals = self.strategy.on_bar(data_dict, current_date)
 
             log_data["signals_count"] = len(signals) if signals else 0
+
+            # 保存信号因子详情到数据库 (新增可视化功能)
+            self._save_signal_factors(db, signals, monitor_time)
 
             if not signals:
                 trader_logger.info("策略未产生信号")
@@ -339,6 +354,46 @@ class TradingBot:
                 notifier.send_trade_notification(ts_code, direction, price, volume, strategy_name)
         except Exception as e:
             trader_logger.error(f"发送钉钉通知失败：{e}")
+
+    def _save_signal_factors(self, db, signals, monitor_time: str):
+        """保存信号因子详情到数据库 (用于可视化)"""
+        try:
+            for signal in signals:
+                if signal.factors is None:
+                    continue
+
+                factors = signal.factors
+                factor_dict = factors.get('factors', {})
+                ma_values = factors.get('ma_values', {})
+
+                sql = """
+                    INSERT INTO monitoring_details
+                    (monitor_time, ts_code, signal_score, factor_ma_cross, factor_perfect_trend,
+                     factor_macd, factor_rsi, factor_bb, factor_volume, factor_trend,
+                     market_state, position_ratio_suggested, signal_direction, trigger_reason,
+                     is_buy_signal)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """
+                db.execute(sql, (
+                    monitor_time,
+                    signal.ts_code,
+                    factors.get('total_score', 0),
+                    factor_dict.get('ma_cross', 0),
+                    factor_dict.get('perfect_trend', 0),
+                    factor_dict.get('macd', 0),
+                    factor_dict.get('rsi', 0),
+                    factor_dict.get('bb', 0),
+                    factor_dict.get('volume', 0),
+                    factor_dict.get('trend', 0),
+                    signal.market_state or factors.get('market_state', ''),
+                    signal.weight if hasattr(signal, 'weight') else 1.0,
+                    factors.get('signal_direction', signal.direction),
+                    factors.get('trigger_reason', signal.reason),
+                    1 if signal.direction == 'buy' else 0
+                ))
+            trader_logger.debug(f"信号因子已保存：{len(signals)} 个信号")
+        except Exception as e:
+            trader_logger.error(f"保存信号因子失败：{e}")
 
     def _save_monitoring_log(self, db, log_data: dict):
         """保存监控日志到数据库"""

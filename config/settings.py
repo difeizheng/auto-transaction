@@ -124,3 +124,62 @@ DINGDING_NOTIFY_CONFIG = {
     'daily_summary': True,          # 每日 summary
     'daily_summary_time': '15:30',  # 每日 summary 发送时间
 }
+
+# ============ 实盘交易配置 ============
+# 实盘模式开关
+REAL_TRADING_MODE = os.getenv("REAL_TRADING_MODE", "false").lower() == "true"
+
+# 券商配置
+REAL_BROKER_TYPE = os.getenv("REAL_BROKER_TYPE", "huatai")  # 券商类型
+REAL_BROKER_CONFIG_PATH = os.getenv("REAL_BROKER_CONFIG_PATH", "config/broker_config.json")
+
+# 数据源配置
+USE_REALTIME_DATA = os.getenv("USE_REALTIME_DATA", "true").lower() == "true"  # 使用实时数据
+REALTIME_DATA_SOURCE = os.getenv("REALTIME_DATA_SOURCE", "sina")  # sina/tencent
+
+# 实盘风控参数
+REAL_TRADING_RISK_CONFIG = {
+    'enabled': REAL_TRADING_MODE,
+    # 仓位限制（实盘更严格）
+    'max_position_ratio': 0.80,       # 实盘最大仓位 80%
+    'max_stock_position_ratio': 0.25, # 单只股票最大 25%
+    # 价格异常检测
+    'price_anomaly_threshold': 0.03,  # 3% 价格异常波动
+    'limit_up_check_enabled': True,   # 启用涨跌停检查
+    # 流动性检测
+    'min_daily_volume': 100000,       # 最小日成交量 10 万手
+    'min_daily_amount': 10000000,     # 最小日成交额 1000 万
+    # 交易时段限制
+    'avoid_call_auction': True,       # 避免集合竞价
+    'morning_start_time': '09:35',    # 上午开始交易时间
+    'afternoon_end_time': '14:55',    # 下午结束交易时间
+    # 大额订单确认
+    'large_order_threshold': 50000,   # 大额订单阈值 5 万
+    'large_order_confirmation': True, # 启用大额订单二次确认
+}
+
+# 熔断配置
+CIRCUIT_BREAKER_CONFIG = {
+    'enabled': True,
+    'single_stock_loss_threshold': 0.10,  # 单只股票亏损 10% 触发
+    'portfolio_loss_threshold': 0.05,     # 组合亏损 5% 触发
+    'daily_loss_threshold': 0.03,         # 单日亏损 3% 触发
+    'market_drop_threshold': 0.03,        # 市场下跌 3% 触发
+    'cooldown_period': 300,               # 冷却期 5 分钟
+}
+
+# 实时监控配置
+REALTIME_MONITOR_CONFIG = {
+    'enabled': REAL_TRADING_MODE,
+    'interval': 10,                       # 监控间隔 10 秒
+    'price_change_threshold': 0.05,       # 5% 价格变动告警
+    'data_delay_threshold': 60,           # 数据延迟 60 秒告警
+}
+
+# 紧急处理配置
+EMERGENCY_HANDLER_CONFIG = {
+    'enabled': REAL_TRADING_MODE,
+    'auto_stop_loss': True,               # 自动止损
+    'auto_clear_position': True,          # 自动清仓（触发熔断时）
+    'dingtalk_emergency_notify': True,    # 紧急通知
+}

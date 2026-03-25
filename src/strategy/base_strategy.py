@@ -22,6 +22,8 @@ class Signal:
     strength: float = 1.0  # 信号强度 (0-1)
     reason: str = ""  # 信号原因
     strategy_name: str = ""
+    factors: Optional[Dict[str, Any]] = None  # 信号因子详情 (用于可视化)
+    market_state: str = ""  # 市场状态 (BULL/BEAR/SIDEWAYS)
 
 
 class BaseStrategy(ABC):
@@ -90,7 +92,9 @@ class BaseStrategy(ABC):
         volume: int,
         weight: float = 1.0,
         strength: float = 1.0,
-        reason: str = ""
+        reason: str = "",
+        factors: Optional[Dict[str, Any]] = None,
+        market_state: str = ""
     ) -> Signal:
         """
         生成交易信号
@@ -103,6 +107,8 @@ class BaseStrategy(ABC):
             weight: 目标权重
             strength: 信号强度
             reason: 信号原因
+            factors: 信号因子详情
+            market_state: 市场状态
 
         Returns:
             交易信号
@@ -115,7 +121,9 @@ class BaseStrategy(ABC):
             weight=weight,
             strength=strength,
             reason=reason,
-            strategy_name=self.name
+            strategy_name=self.name,
+            factors=factors,
+            market_state=market_state
         )
 
     def calculate_position_size(

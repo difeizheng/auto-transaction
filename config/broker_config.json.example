@@ -1,0 +1,29 @@
+{
+  "_comment": "券商配置文件示例 - 请根据实际情况修改",
+  "_description": "此文件用于 easytrader 连接券商账户",
+
+  "user": "你的证券账号",
+  "password": "你的登录密码",
+  "comm_password": "你的通讯密码/交易密码",
+
+  "_notes": {
+    "user": "证券账号，通常是资金账号或股东代码",
+    "password": "登录密码，不是交易密码",
+    "comm_password": "通讯密码，部分券商称为交易密码或资金密码"
+  },
+
+  "_supported_brokers": {
+    "huatai": "华泰证券 - 使用 htzq 客户端",
+    "yinhai": "银河证券 - 使用 yh_client 客户端",
+    "guojin": "国金证券 - 使用 gj_client 客户端",
+    "cicc": "中金财富 - 使用 cicc 客户端",
+    "zhongtaixtp": "中泰证券 XTP - 使用 xtp 客户端"
+  },
+
+  "_usage": {
+    "step1": "复制此文件为 broker_config.json",
+    "step2": "修改上述配置为你的实际账号信息",
+    "step3": "确保 easytrader 已安装：pip install easytrader",
+    "step4": "运行测试脚本验证连接"
+  }
+}

@@ -154,6 +154,32 @@ class Database:
                 )
             """,
 
+            # 实时行情表 (用于实盘监控)
+            "realtime_quotes": """
+                CREATE TABLE IF NOT EXISTS realtime_quotes (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    ts_code TEXT NOT NULL,
+                    trade_date TEXT NOT NULL,
+                    name TEXT,
+                    open REAL,
+                    high REAL,
+                    low REAL,
+                    price REAL,
+                    pre_close REAL,
+                    change REAL,
+                    pct_chg REAL,
+                    bid REAL,
+                    ask REAL,
+                    bid_volume INTEGER,
+                    ask_volume INTEGER,
+                    volume INTEGER,
+                    amount REAL,
+                    update_time TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE(ts_code, trade_date)
+                )
+            """,
+
             # 财务指标表
             "financial_indicators": """
                 CREATE TABLE IF NOT EXISTS financial_indicators (
@@ -266,6 +292,29 @@ class Database:
                     error_message TEXT,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
+            """,
+
+            # 监控详情表 (记录每只股票的信号因子得分)
+            "monitoring_details": """
+                CREATE TABLE IF NOT EXISTS monitoring_details (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    monitor_time TEXT NOT NULL,
+                    ts_code TEXT NOT NULL,
+                    signal_score REAL,                  -- 总评分 (如 5.5/10.5)
+                    factor_ma_cross REAL DEFAULT 0,     -- 均线金叉得分
+                    factor_perfect_trend REAL DEFAULT 0, -- 完美多头排列得分
+                    factor_macd REAL DEFAULT 0,         -- MACD 得分
+                    factor_rsi REAL DEFAULT 0,          -- RSI 得分
+                    factor_bb REAL DEFAULT 0,           -- 布林带得分
+                    factor_volume REAL DEFAULT 0,       -- 成交量得分
+                    factor_trend REAL DEFAULT 0,        -- 趋势得分
+                    market_state TEXT,                  -- BULL/BEAR/SIDEWAYS
+                    position_ratio_suggested REAL,      -- 建议仓位比例
+                    signal_direction TEXT,              -- buy/sell/none
+                    trigger_reason TEXT,                -- 触发原因
+                    is_buy_signal INTEGER DEFAULT 0,    -- 是否买入信号
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
             """
         }
 
@@ -279,6 +328,8 @@ class Database:
             "CREATE INDEX IF NOT EXISTS idx_orders_status ON orders(status)",
             "CREATE INDEX IF NOT EXISTS idx_monitoring_logs_time ON monitoring_logs(monitor_time)",
             "CREATE INDEX IF NOT EXISTS idx_monitoring_logs_created ON monitoring_logs(created_at)",
+            "CREATE INDEX IF NOT EXISTS idx_monitoring_details_time ON monitoring_details(monitor_time)",
+            "CREATE INDEX IF NOT EXISTS idx_monitoring_details_ts_code ON monitoring_details(ts_code)",
         ]
 
         with self.get_connection() as conn:
