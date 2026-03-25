@@ -108,3 +108,19 @@ REBALANCE_CONFIG = {
 # ============ 通知配置 ============
 ENABLE_EMAIL_NOTIFY = False
 ENABLE_WECHAT_NOTIFY = False
+
+# ============ 钉钉通知配置 ============
+DINGDING_WEBHOOK = os.getenv("DINGDING_WEBHOOK", "")
+DINGDING_SECRET = os.getenv("DINGDING_SECRET", "")
+ENABLE_DINGDING_NOTIFY = os.getenv("ENABLE_DINGDING_NOTIFY", "false").lower() == "true"
+
+# 钉钉通知触发条件
+DINGDING_NOTIFY_CONFIG = {
+    'enabled': ENABLE_DINGDING_NOTIFY,
+    'notify_on_trade': True,        # 交易时通知
+    'notify_on_signal': False,      # 产生信号时通知（可能频繁）
+    'notify_on_stop_loss': True,    # 止损时通知
+    'notify_on_take_profit': True,  # 止盈时通知
+    'daily_summary': True,          # 每日 summary
+    'daily_summary_time': '15:30',  # 每日 summary 发送时间
+}

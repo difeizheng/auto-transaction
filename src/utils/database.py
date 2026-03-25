@@ -247,6 +247,25 @@ class Database:
                     next_cal_date TEXT,
                     UNIQUE(exchange, cal_date)
                 )
+            """,
+
+            # 监控历史记录表
+            "monitoring_logs": """
+                CREATE TABLE IF NOT EXISTS monitoring_logs (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    monitor_time TEXT NOT NULL,
+                    market_state TEXT,
+                    stock_pool TEXT,
+                    stocks_count INTEGER DEFAULT 0,
+                    signals_count INTEGER DEFAULT 0,
+                    buy_signals_count INTEGER DEFAULT 0,
+                    sell_signals_count INTEGER DEFAULT 0,
+                    trades_executed INTEGER DEFAULT 0,
+                    buy_orders TEXT,
+                    sell_orders TEXT,
+                    error_message TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
             """
         }
 
@@ -258,6 +277,8 @@ class Database:
             "CREATE INDEX IF NOT EXISTS idx_financial_ts_code ON financial_indicators(ts_code)",
             "CREATE INDEX IF NOT EXISTS idx_signals_strategy ON strategy_signals(strategy_name)",
             "CREATE INDEX IF NOT EXISTS idx_orders_status ON orders(status)",
+            "CREATE INDEX IF NOT EXISTS idx_monitoring_logs_time ON monitoring_logs(monitor_time)",
+            "CREATE INDEX IF NOT EXISTS idx_monitoring_logs_created ON monitoring_logs(created_at)",
         ]
 
         with self.get_connection() as conn:

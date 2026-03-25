@@ -122,32 +122,42 @@ class TradingBot:
 
     def setup_jobs(self):
         """设置定时任务"""
-        # 盘前准备
+        from datetime import datetime, timedelta
+
+        # 盘前准备（交易日 08:30）
         self.scheduler.add_job(
             self.pre_market_prepare,
             trigger='cron',
             job_id='pre_market',
             hour=8,
-            minute=30
+            minute=30,
+            day_of_week='mon-fri'
         )
 
-        # 盘中监控 (每 5 分钟)
+        # 盘中监控 (每 5 分钟，从下一个整 5 分钟开始)
+        now = datetime.now()
+        next_run = now.replace(second=0, microsecond=0)
+        # 计算下一个 5 分钟倍数时间点
+        if next_run.minute % 5 != 0:
+            next_run += timedelta(minutes=(5 - next_run.minute % 5))
+
         self.scheduler.add_job(
             self.intra_market_monitor,
             trigger='interval',
             job_id='intra_market',
             minutes=5,
-            start_date=datetime.now().replace(hour=9, minute=25),
+            start_date=next_run,
             end_date=datetime.now().replace(hour=15, minute=5)
         )
 
-        # 盘后分析
+        # 盘后分析（交易日 16:00）
         self.scheduler.add_job(
             self.post_market_analysis,
             trigger='cron',
             job_id='post_market',
             hour=16,
-            minute=0
+            minute=0,
+            day_of_week='mon-fri'
         )
 
         # 风控检查 (每小时)
@@ -156,11 +166,11 @@ class TradingBot:
             trigger='interval',
             job_id='risk_check',
             hours=1,
-            start_date=datetime.now().replace(hour=9, minute=30),
+            start_date=datetime.now().replace(minute=0, second=0),
             end_date=datetime.now().replace(hour=15, minute=0)
         )
 
-        trader_logger.info("定时任务设置完成")
+        trader_logger.info(f"定时任务设置完成，盘中监控下次执行：{next_run}")
 
     def pre_market_prepare(self):
         """盘前准备"""
@@ -190,23 +200,171 @@ class TradingBot:
         trader_logger.info("=== 盘前准备完成 ===")
 
     def intra_market_monitor(self):
-        """盘中监控"""
-        if not self.market_open:
-            return
+        """盘中监控 - 每 5 分钟执行一次"""
+        from datetime import datetime
+        from src.utils.database import db
+        import json
 
-        trader_logger.debug("=== 盘中监控 ===")
+        monitor_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        current_date = datetime.now().strftime("%Y%m%d")
 
-        # 1. 获取当前行情
-        # 实际使用需要接入实时行情
+        # 监控日志数据
+        log_data = {
+            "monitor_time": monitor_time,
+            "market_state": "open" if self.market_open else "closed",
+            "stock_pool": ",".join(['000063.SZ', '000014.SZ', '000078.SZ', '000039.SZ', '000001.SZ']),
+            "stocks_count": 0,
+            "signals_count": 0,
+            "buy_signals_count": 0,
+            "sell_signals_count": 0,
+            "trades_executed": 0,
+            "buy_orders": "",
+            "sell_orders": "",
+            "error_message": ""
+        }
 
-        # 2. 执行策略信号
-        # 这里简化处理，实际需要根据实时数据触发
+        try:
+            if not self.market_open:
+                trader_logger.debug("市场未开盘，跳过监控")
+                log_data["error_message"] = "市场未开盘"
+                self._save_monitoring_log(db, log_data)
+                return
 
-        # 3. 检查订单状态
-        pending_orders = self.broker.get_orders(status='pending')
-        for order in pending_orders:
-            # 超时未成交的订单取消
-            pass
+            trader_logger.info("=== 盘中监控 ===")
+
+            # 1. 获取当日数据（模拟实时行情）
+            stock_pool = ['000063.SZ', '000014.SZ', '000078.SZ', '000039.SZ', '000001.SZ']
+            data_dict = {}
+
+            for ts_code in stock_pool:
+                # 获取最近 60 天数据用于策略计算
+                df = self.data_manager.get_daily_quotes(ts_code, '20260101', current_date)
+                if not df.empty:
+                    data_dict[ts_code] = df
+                    trader_logger.debug(f"{ts_code}: 获取到 {len(df)} 条数据")
+                else:
+                    trader_logger.warning(f"{ts_code}: 无数据")
+
+            log_data["stocks_count"] = len(data_dict)
+
+            if not data_dict:
+                trader_logger.warning("未获取到任何股票数据")
+                log_data["error_message"] = "未获取到任何股票数据"
+                self._save_monitoring_log(db, log_data)
+                return
+
+            trader_logger.info(f"获取到 {len(data_dict)} 只股票数据")
+
+            # 2. 调用策略生成信号
+            trader_logger.info(f"调用策略 on_bar 方法...")
+            signals = self.strategy.on_bar(data_dict, current_date)
+
+            log_data["signals_count"] = len(signals) if signals else 0
+
+            if not signals:
+                trader_logger.info("策略未产生信号")
+                self._save_monitoring_log(db, log_data)
+                return
+
+            trader_logger.info(f"策略产生 {len(signals)} 个信号")
+
+            # 3. 统计买卖信号
+            buy_signals = []
+            sell_signals = []
+            trades_executed = 0
+
+            # 4. 执行信号
+            for signal in signals:
+                trader_logger.info(f"信号：{signal.ts_code} {signal.direction} {signal.volume}@{signal.price:.2f} - {signal.reason}")
+
+                # 检查风控
+                if not self.risk_controller.can_trade(
+                    self.broker.get_account_info(),
+                    {signal.ts_code: signal.volume}
+                ):
+                    trader_logger.warning(f"风控阻止交易：{signal.ts_code}")
+                    continue
+
+                # 提交订单
+                if signal.direction == 'buy':
+                    order_id = self.broker.submit_order(
+                        ts_code=signal.ts_code,
+                        direction='buy',
+                        price=signal.price,
+                        volume=signal.volume,
+                        strategy_name=self.strategy.name
+                    )
+                    if order_id:
+                        trader_logger.info(f"买入订单提交成功：{order_id}")
+                        trades_executed += 1
+                        buy_signals.append(f"{signal.ts_code}@{signal.price:.2f}x{signal.volume}")
+                        # 发送钉钉通知
+                        self._send_trade_notification(signal.ts_code, 'buy', signal.price, signal.volume, self.strategy.name)
+                elif signal.direction == 'sell':
+                    order_id = self.broker.submit_order(
+                        ts_code=signal.ts_code,
+                        direction='sell',
+                        price=signal.price,
+                        volume=signal.volume,
+                        strategy_name=self.strategy.name
+                    )
+                    if order_id:
+                        trader_logger.info(f"卖出订单提交成功：{order_id}")
+                        trades_executed += 1
+                        sell_signals.append(f"{signal.ts_code}@{signal.price:.2f}x{signal.volume}")
+                        # 发送钉钉通知
+                        self._send_trade_notification(signal.ts_code, 'sell', signal.price, signal.volume, self.strategy.name)
+
+            # 更新日志数据
+            log_data["buy_signals_count"] = len(buy_signals)
+            log_data["sell_signals_count"] = len(sell_signals)
+            log_data["trades_executed"] = trades_executed
+            log_data["buy_orders"] = ",".join(buy_signals) if buy_signals else ""
+            log_data["sell_orders"] = ",".join(sell_signals) if sell_signals else ""
+
+            # 保存监控日志
+            self._save_monitoring_log(db, log_data)
+
+        except Exception as e:
+            trader_logger.error(f"盘中监控执行失败：{e}", exc_info=True)
+            log_data["error_message"] = str(e)
+            self._save_monitoring_log(db, log_data)
+
+    def _send_trade_notification(self, ts_code: str, direction: str, price: float, volume: int, strategy_name: str):
+        """发送交易通知到钉钉"""
+        try:
+            from src.utils.dingtalk_notifier import DingTalkNotifier
+            notifier = DingTalkNotifier()
+            if notifier.enabled and notifier.webhook:
+                notifier.send_trade_notification(ts_code, direction, price, volume, strategy_name)
+        except Exception as e:
+            trader_logger.error(f"发送钉钉通知失败：{e}")
+
+    def _save_monitoring_log(self, db, log_data: dict):
+        """保存监控日志到数据库"""
+        try:
+            sql = """
+                INSERT INTO monitoring_logs
+                (monitor_time, market_state, stock_pool, stocks_count, signals_count,
+                 buy_signals_count, sell_signals_count, trades_executed, buy_orders, sell_orders, error_message)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """
+            db.execute(sql, (
+                log_data["monitor_time"],
+                log_data["market_state"],
+                log_data["stock_pool"],
+                log_data["stocks_count"],
+                log_data["signals_count"],
+                log_data["buy_signals_count"],
+                log_data["sell_signals_count"],
+                log_data["trades_executed"],
+                log_data["buy_orders"],
+                log_data["sell_orders"],
+                log_data["error_message"]
+            ))
+            trader_logger.debug(f"监控日志已保存：{log_data['monitor_time']}")
+        except Exception as e:
+            trader_logger.error(f"保存监控日志失败：{e}")
 
     def post_market_analysis(self):
         """盘后分析"""

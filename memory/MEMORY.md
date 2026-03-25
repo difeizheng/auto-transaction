@@ -593,3 +593,135 @@ python start_services.py scheduler
 - 积累 3-6 个月实盘数据后重新优化
 - 根据实际交易记录调整参数
 - 必要时扩展股票池或调整仓位配置
+
+---
+
+## 2026-03-24 最终工作状态
+
+### 已完成工作 ✅
+
+**策略优化**:
+1. ✅ 深度优化 v2.0 - 突破 15% 年化瓶颈 (14 组测试)
+2. ✅ 深度优化 v3.0 - 验证稳健版配置 (14 组测试)
+3. ✅ 最优配置确定：
+   - 进取版：牛市 55% + 阈值 5.5 → 年化 16.15%
+   - 稳健版：牛市 53% + 阈值 5.5 → 年化 15.22%, 回撤 14.46% ✅
+
+**代码更新**:
+1. ✅ `src/strategy/optimal_strategy.py` - 新增 mode 参数支持
+2. ✅ `start_services.py` - 新增 --mode 参数
+3. ✅ `start_paper_conservative.py` - 稳健版启动脚本
+
+**文档**:
+1. ✅ `docs/strategy_final_config.md` - 最终配置说明
+2. ✅ `docs/strategy_v3_summary.md` - v3.0 优化总结
+3. ✅ `docs/paper_trading_log.md` - 模拟盘启动记录
+
+**Git**:
+1. ✅ 提交：`5f18ea0` - feat: 策略优化至 16.15% 年化
+2. ✅ Tag: `v1.2.0` - 策略优化里程碑
+
+**模拟盘**:
+1. ✅ 稳健版 (牛市 53%) 已启动
+2. ✅ 初始资金：100,000 元
+3. ✅ 股票池：000063, 000014, 000078, 000039, 000001
+
+---
+
+### 待完成工作 📋
+
+**P0 - 高优先级**:
+1. ⏳ 模拟盘监控 - 每日检查信号执行、仓位控制
+2. ⏳ 周度评估 - 追踪胜率、回撤、交易次数
+3. ⏳ 月度报告 - 对比实际收益 vs 预期 (15.22%)
+
+**P1 - 中优先级**:
+1. ⏳ 夏普比率优化 (0.62 → 1.0)
+   - 方向：改进市场状态判断逻辑
+   - 方向：增加成交量确认权重
+
+2. ⏳ 胜率优化 (51.4% → 55%)
+   - 方向：新增动量因子
+   - 方向：新增主力资金因子
+   - 方向：股票池动态筛选强势股
+
+**P2 - 低优先级**:
+1. ⏳ 多策略组合
+   - 引入趋势跟踪策略
+   - 引入均值回归策略
+
+2. ⏳ 基本面因子增强
+   - ROE、营收增长因子
+   - 定期调仓机制
+
+3. ⏳ 交易成本优化
+   - 优化下单时机
+   - 减少滑点成本
+
+---
+
+### 下次恢复工作指引
+
+**如果你有 1-2 小时**:
+- 运行 `python scripts/strategy_v3_optimization.py` 继续参数微调
+- 测试牛市仓位 52% 的表现
+
+**如果你有半天**:
+- 实现动量因子并加入信号评分系统
+- 测试新因子对胜率的提升效果
+
+**如果你有 1 天**:
+- 实现多策略组合框架
+- 回测验证多策略低相关性
+
+**模拟盘运行中**:
+- 每日查看 `logs/trader_*.log` 检查交易执行
+- 每周更新 `docs/paper_trading_log.md` 记录表现
+
+---
+
+## 2026-03-25 监控历史记录功能
+
+### 新增功能 ✅
+1. **监控历史记录表** - `monitoring_logs` 表记录每次盘中监控详情
+2. **Web 监控历史页面** - 支持查询/过滤监控历史
+3. **自动记录逻辑** - `intra_market_monitor` 方法自动保存监控日志
+
+### 修改文件
+- `src/utils/database.py` - 新增 `monitoring_logs` 表结构
+- `src/trader/scheduler.py` - 添加 `_save_monitoring_log` 方法和记录逻辑
+- `web_server.py` - 新增监控历史页面和 API
+
+### 数据库表结构
+```sql
+CREATE TABLE monitoring_logs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    monitor_time TEXT NOT NULL,
+    market_state TEXT,
+    stock_pool TEXT,
+    stocks_count INTEGER DEFAULT 0,
+    signals_count INTEGER DEFAULT 0,
+    buy_signals_count INTEGER DEFAULT 0,
+    sell_signals_count INTEGER DEFAULT 0,
+    trades_executed INTEGER DEFAULT 0,
+    buy_orders TEXT,
+    sell_orders TEXT,
+    error_message TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+)
+```
+
+### Web API
+- `GET /api/monitoring-history` - 获取监控历史列表 (支持日期/市场状态过滤)
+- `GET /api/monitoring-history/{id}` - 获取单条监控详情
+
+### 页面功能
+- 统计摘要：总监控次数、总信号数、买入/卖出信号、成交笔数
+- 表格展示：时间、市场状态、股票数、信号数、买入/卖出、成交
+- 详情模态框：查看完整的监控日志信息
+- 筛选条件：开始日期、结束日期、市场状态
+
+### 钉钉通知集成 (2026-03-25)
+- 交易执行时自动发送钉钉通知
+- 配置文件：`src/utils/dingtalk_notifier.py`
+- 配置项：`ENABLE_DINGDING_NOTIFY`, `DINGDING_WEBHOOK`, `DINGDING_SECRET`
