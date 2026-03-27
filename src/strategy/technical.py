@@ -60,12 +60,12 @@ class TechnicalStrategy(BaseStrategy):
 
             new_row = pd.DataFrame([{
                 'trade_date': current_date,
-                'open': bar.get('open', 0),
-                'high': bar.get('high', 0),
-                'low': bar.get('low', 0),
-                'close': bar.get('close', 0),
-                'vol': bar.get('vol', 0),
-                'amount': bar.get('amount', 0)
+                'open': float(bar.get('open', 0)),
+                'high': float(bar.get('high', 0)),
+                'low': float(bar.get('low', 0)),
+                'close': float(bar.get('close', 0)),
+                'vol': float(bar.get('vol', 0)),
+                'amount': float(bar.get('amount', 0))
             }])
 
             self.price_history[ts_code] = pd.concat(
@@ -109,7 +109,8 @@ class TechnicalStrategy(BaseStrategy):
             df = self.price_history[ts_code]
 
             # 计算技术指标
-            close = df['close']
+            # 确保数据类型为 numeric
+            close = pd.to_numeric(df['close'], errors='coerce')
 
             # 均线
             ma_short = close.rolling(window=self.params.ma_short).mean()

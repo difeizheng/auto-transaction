@@ -31,6 +31,9 @@ def setup_logger(name: str) -> logging.Logger:
     # 控制台处理器
     console_handler = logging.StreamHandler(sys.stdout)
     console_handler.setFormatter(formatter)
+    # Windows 控制台使用 errors='ignore' 避免编码问题
+    if sys.platform == 'win32':
+        console_handler.stream = open(sys.stdout.fileno(), 'w', encoding='utf-8', errors='ignore', closefd=False)
     logger.addHandler(console_handler)
 
     # 文件处理器 (按大小轮转，最大 10MB)

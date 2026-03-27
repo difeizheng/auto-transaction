@@ -71,11 +71,11 @@ class DingTalkNotifier:
             at_mobiles: 需要@的手机号列表
         """
         if not self.enabled:
-            trader_logger.debug("钉钉通知未启用，跳过发送")
+            trader_logger.debug("DingTalk notifier disabled, skipping")
             return False
 
         if not self.webhook:
-            trader_logger.warning("钉钉 Webhook 未配置")
+            trader_logger.warning("DingTalk Webhook not configured")
             return False
 
         try:
@@ -97,14 +97,14 @@ class DingTalkNotifier:
             result = response.json()
 
             if result.get('errcode') == 0:
-                trader_logger.info(f"钉钉消息发送成功")
+                trader_logger.info(f"DingTalk message sent successfully")
                 return True
             else:
                 trader_logger.error(f"钉钉消息发送失败：{result}")
                 return False
 
         except Exception as e:
-            trader_logger.error(f"钉钉消息发送异常：{e}")
+            trader_logger.error(f"DingTalk message send failed: {e}")
             return False
 
     def send_markdown(self, title: str, text: str, at_all: bool = True):
@@ -117,11 +117,11 @@ class DingTalkNotifier:
             at_all: 是否 @所有人
         """
         if not self.enabled:
-            trader_logger.debug("钉钉通知未启用，跳过发送")
+            trader_logger.debug("DingTalk notifier disabled, skipping")
             return False
 
         if not self.webhook:
-            trader_logger.warning("钉钉 Webhook 未配置")
+            trader_logger.warning("DingTalk Webhook not configured")
             return False
 
         try:
@@ -143,14 +143,14 @@ class DingTalkNotifier:
             result = response.json()
 
             if result.get('errcode') == 0:
-                trader_logger.info(f"钉钉 Markdown 消息发送成功：{title}")
+                trader_logger.info(f"DingTalk Markdown message sent successfully: {title}")
                 return True
             else:
-                trader_logger.error(f"钉钉消息发送失败：{result}")
+                trader_logger.error(f"DingTalk message send failed: {result}")
                 return False
 
         except Exception as e:
-            trader_logger.error(f"钉钉消息发送异常：{e}")
+            trader_logger.error(f"DingTalk message send failed: {e}")
             return False
 
     def send_trade_notification(self, ts_code: str, direction: str, price: float,

@@ -10,6 +10,8 @@ from enum import Enum
 
 from src.strategy.base_strategy import BaseStrategy, Signal
 from src.utils.helpers import calculate_macd, calculate_rsi, calculate_bollinger_bands
+from src.strategy.sharpe_optimizer import SharpeOptimizer, SharpeOptimizationConfig
+from src.strategy.win_rate_optimizer import WinRateOptimizer, WinRateOptimizationConfig, create_win_rate_optimizer
 from config.logging_config import strategy_logger
 
 
@@ -74,6 +76,19 @@ class OptimalStrategyParams:
     use_market_filter: bool = True     # 启用市场状态过滤
     market_bear_max_position: float = 0.05  # 熊市最大仓位 5%
 
+    # v3.0 新增：夏普优化
+    use_sharpe_optimization: bool = True  # 启用夏普优化
+    max_volatility_threshold: float = 0.04  # 最大波动率阈值 4%
+    min_stability_threshold: float = 0.6  # 最小稳定性阈值
+    profit_lock_trigger: float = 0.08  # 利润锁定触发点 8%
+
+    # v4.0 新增：胜率优化
+    use_win_rate_optimization: bool = True  # 启用胜率优化
+    min_momentum_score: float = 0.03  # 最小动量得分
+    min_money_flow_score: float = 0  # 最小资金流得分
+    min_stock_strength_rank: float = 0.3  # 最小股票强度排名 (前 30%)
+    min_signal_confidence: float = 0.6  # 最小信号置信度
+
 
 class OptimalStrategy(BaseStrategy):
     """
@@ -98,6 +113,24 @@ class OptimalStrategy(BaseStrategy):
         self.price_history: Dict[str, pd.DataFrame] = {}
         self.positions: Dict[str, Dict] = {}  # {ts_code: {entry_price, highest_price, shares}}
         self.market_state = MarketState.SIDEWAYS
+
+        # v3.0: 初始化夏普优化器
+        if self.params.use_sharpe_optimization:
+            sharpe_config = SharpeOptimizationConfig(
+                use_volatility_filter=True,
+                max_volatility_threshold=self.params.max_volatility_threshold,
+                min_stability_threshold=self.params.min_stability_threshold,
+                profit_lock_trigger=self.params.profit_lock_trigger,
+            )
+            self.sharpe_optimizer = SharpeOptimizer(sharpe_config)
+        else:
+            self.sharpe_optimizer = None
+
+        # v4.0: 初始化胜率优化器
+        if self.params.use_win_rate_optimization:
+            self.win_rate_optimizer = create_win_rate_optimizer()
+        else:
+            self.win_rate_optimizer = None
 
     def on_init(self):
         """策略初始化"""
@@ -275,9 +308,9 @@ class OptimalStrategy(BaseStrategy):
         current_price: float
     ) -> int:
         """
-        智能仓位管理 (增强版)
+        智能仓位管理 (增强版 - v3.0 夏普优化)
 
-        根据市场状态、信号强度、波动率动态调整
+        根据市场状态、信号强度、波动率、稳定性动态调整
         """
         # 基础仓位
         base_ratio = self.params.base_position_ratio
@@ -299,6 +332,12 @@ class OptimalStrategy(BaseStrategy):
         # 根据波动率调整 (高波动降仓)
         volatility_adjustment = self.get_volatility_adjustment(ts_code)
         position_ratio *= volatility_adjustment
+
+        # v3.0: 根据稳定性调整 (夏普优化)
+        if self.sharpe_optimizer and self.params.use_sharpe_optimization:
+            stability_adj = self.sharpe_optimizer.get_stability_adjustment(ts_code)
+            position_ratio *= stability_adj
+            strategy_logger.debug(f"{ts_code}: 稳定性调整因子={stability_adj:.2f}")
 
         # 计算仓位价值
         total_capital = self.engine.capital if self.engine else 1000000
@@ -356,13 +395,13 @@ class OptimalStrategy(BaseStrategy):
         atr: float
     ) -> Optional[Tuple[str, str]]:
         """
-        检查出场条件 (优化版 - 高盈亏比 + 时间止损)
+        检查出场条件 (v3.0 夏普优化 - 高盈亏比 + 时间止损 + 分级止盈)
 
         核心思路:
-        1. 紧止损 (6%) - 快速止损，保护本金
+        1. 紧止损 (3.5%) - 快速止损，保护本金
         2. 移动止盈 - 让利润奔跑
         3. 时间止损 - 避免资金占用 (8 日无盈利退出)
-        4. 分级止盈 - 部分锁定利润
+        4. 分级止盈 - 部分锁定利润 (v3.0 新增)
 
         Returns:
             (方向，原因) 或 None
@@ -394,7 +433,15 @@ class OptimalStrategy(BaseStrategy):
         if profit_ratio >= dynamic_tp:
             return ('sell', f'止盈 ({profit_ratio:.1%}, TP={dynamic_tp:.1%})')
 
-        # === 3. 移动止损 (盈利超过 8% 后激活) ===
+        # === 3. v3.0: 分级止盈 (盈利 8% 后部分锁定利润) ===
+        if self.sharpe_optimizer and self.params.use_sharpe_optimization:
+            if highest_profit >= self.params.profit_lock_trigger:
+                # 计算回撤
+                drawdown = (highest_price - current_price) / highest_price
+                if drawdown >= 0.03:  # 3% 回撤触发部分止盈
+                    return ('sell', f'部分止盈 (盈利{profit_ratio:.1%}, 回撤{drawdown:.1%})')
+
+        # === 4. 移动止损 (盈利超过 10% 后激活) ===
         if highest_profit >= self.params.trailing_stop_trigger:
             # 计算移动止损回撤阈值
             trailing_threshold = self.params.trailing_stop_ratio
@@ -402,7 +449,7 @@ class OptimalStrategy(BaseStrategy):
             if drawdown >= trailing_threshold:
                 return ('sell', f'移动止损 (回撤{drawdown:.1%})')
 
-        # === 4. 时间止损 (持仓超过 8 日无盈利退出) ===
+        # === 5. 时间止损 (持仓超过 8 日无盈利退出) ===
         if hasattr(self, 'current_date') and entry_date:
             try:
                 from datetime import datetime
@@ -425,12 +472,15 @@ class OptimalStrategy(BaseStrategy):
         bb_signal: str,
         volume_ok: bool,
         trend_ok: bool,
-        perfect_trend: bool = False  # 新增：完美多头排列
+        perfect_trend: bool = False,  # 新增：完美多头排列
+        momentum_score: float = 0.0,  # v4.0: 动量因子得分
+        money_flow_score: float = 0.0,  # v4.0: 资金流因子得分
+        stock_strength: float = 0.5  # v4.0: 股票强度
     ) -> Tuple[bool, float]:
         """
-        综合评分系统 (优化版 - 更严格的高质量信号)
+        综合评分系统 (v4.0 胜率优化 - 新增动量 + 资金流因子)
 
-        权重分配 (总分 10.5 分):
+        权重分配 (总分 13.5 分):
         - 均线金叉：2.0 分 (趋势确认最重要)
         - 完美多头排列：额外 +1.5 分 (最强信号)
         - MACD 多头：1.5 分 (动量确认)
@@ -439,13 +489,15 @@ class OptimalStrategy(BaseStrategy):
         - 布林带下轨：1.0 分 (超卖反弹)
         - 成交量放大：1.5 分 (资金确认)
         - 趋势向上：1.5 分
-        - 新增：价格突破：1.0 分
+        - v4.0 新增：动量因子：1.5 分 (价格动能)
+        - v4.0 新增：资金流向：1.5 分 (主力动向)
+        - v4.0 新增：股票强度：1.0 分 (强势股)
 
         Returns:
             (是否买入，信号强度)
         """
         score = 0.0
-        max_score = 10.5  # 最大可能得分
+        max_score = 13.5  # 最大可能得分 (v4.0 新增因子)
 
         # 1. 均线金叉 (权重 2.0 - 最重要)
         if golden_cross:
@@ -479,12 +531,27 @@ class OptimalStrategy(BaseStrategy):
         if trend_ok:
             score += 1.5
 
+        # v4.0: 8. 动量因子 (权重 1.5)
+        # momentum_score 范围：-1 到 1，转换为 0-1.5 分
+        momentum_points = max(0, min(1.5, (momentum_score + 0.5) * 1.5))
+        score += momentum_points
+
+        # v4.0: 9. 资金流向因子 (权重 1.5)
+        # money_flow_score 范围：-1 到 1，转换为 0-1.5 分
+        flow_points = max(0, min(1.5, (money_flow_score + 0.5) * 1.5))
+        score += flow_points
+
         # 使用动态阈值 (默认 5.0 分，提高信号质量)
         # 增加趋势过滤：趋势向下时不买入 (即使评分高)
         # 完美趋势排列时可以降低阈值要求 (最低 4.5 分)
         effective_threshold = self.params.signal_threshold
         if perfect_trend:
             effective_threshold = max(4.5, self.params.signal_threshold - 0.5)
+
+        # v4.0: 高置信度信号要求
+        if self.params.use_win_rate_optimization:
+            # 启用胜率优化时，要求更高阈值
+            effective_threshold = max(effective_threshold, 6.0)
 
         buy_signal = score >= effective_threshold and trend_ok
         signal_strength = min(1.0, score / max_score)
@@ -623,11 +690,41 @@ class OptimalStrategy(BaseStrategy):
             # 成交量均线
             vol_ma = vol.rolling(self.params.volume_ma_period).mean()
 
-            # 计算 ATR
+            # === 计算 ATR ===
             atr = self.calculate_atr(df)
+
+            # === v3.0: 夏普优化 - 波动率过滤 ===
+            if self.sharpe_optimizer:
+                # 更新价格历史到优化器
+                self.sharpe_optimizer.update_price_history(ts_code, df)
+
+                # 检查是否因高波动跳过交易
+                if self.sharpe_optimizer.should_skip_trade_due_to_volatility(ts_code):
+                    strategy_logger.debug(f"{ts_code}: 波动率过高，跳过交易")
+                    continue
+
+                # 检查稳定性因子，低稳定性股票降仓处理
+                stability_factor = self.sharpe_optimizer.calculate_stability_factor(ts_code)
+                if stability_factor < self.params.min_stability_threshold:
+                    strategy_logger.debug(f"{ts_code}: 稳定性不足 ({stability_factor:.2f})，降仓处理")
 
             # === 判断市场状态 ===
             self.market_state = self.determine_market_state(df)
+
+            # === v3.0: 增强市场状态检查 ===
+            if self.sharpe_optimizer and self.params.use_sharpe_optimization:
+                enhanced_state = self.sharpe_optimizer.check_enhanced_market_state(
+                    df, self.market_state.value
+                )
+                if enhanced_state != self.market_state.value:
+                    strategy_logger.debug(f"{ts_code}: 市场状态调整 {self.market_state.value} -> {enhanced_state}")
+                    # 更新市场状态用于仓位计算
+                    if enhanced_state == 'bear':
+                        self.market_state = MarketState.BEAR
+                    elif enhanced_state == 'bull':
+                        self.market_state = MarketState.BULL
+                    else:
+                        self.market_state = MarketState.SIDEWAYS
 
             # === 检查出场条件 (如果已持仓) ===
             if ts_code in self.positions:
@@ -688,10 +785,37 @@ class OptimalStrategy(BaseStrategy):
             # 7. 趋势判断
             trend_ok = current_price > ma_trend.iloc[-1] * (1 + self.params.trend_threshold)
 
-            # 综合评分
+            # v4.0: 8. 动量因子
+            momentum_score = 0.0
+            if self.win_rate_optimizer:
+                self.win_rate_optimizer.update_price_history(ts_code, df)
+                momentum_score = self.win_rate_optimizer.calculate_momentum(ts_code)
+
+            # v4.0: 9. 资金流向因子
+            money_flow_score = 0.0
+            if self.win_rate_optimizer:
+                money_flow_score = self.win_rate_optimizer.calculate_money_flow(ts_code)
+
+            # v4.0: 10. 股票强度
+            stock_strength = 0.5
+            if self.win_rate_optimizer:
+                stock_strength = self.win_rate_optimizer.calculate_stock_strength(ts_code)
+
+                # 检查是否因动量不足跳过
+                if self.win_rate_optimizer.should_skip_trade_due_to_momentum(ts_code):
+                    strategy_logger.debug(f"{ts_code}: 动量不足，跳过交易")
+                    continue
+
+                # 检查是否因强度不足过滤
+                if self.win_rate_optimizer.should_filter_stock(ts_code):
+                    strategy_logger.debug(f"{ts_code}: 股票强度不足，过滤")
+                    continue
+
+            # 综合评分 (v4.0 新增动量、资金流、强度因子)
             buy_signal, signal_strength = self.calculate_signal_score(
                 golden_cross, macd_bullish, rsi_ok, rsi_oversold, bb_signal,
-                volume_confirmed, trend_ok, perfect_trend
+                volume_confirmed, trend_ok, perfect_trend,
+                momentum_score, money_flow_score, stock_strength
             )
 
             # 获取信号因子详情 (用于可视化)

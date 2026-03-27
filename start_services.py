@@ -54,6 +54,21 @@ def start_scheduler():
         # 2. 筛选潜力股票
         # 3. 更新策略参数
 
+    # 模拟盘监控 (交易日 12:00 - 午间检查)
+    @scheduler.scheduled_job('cron', hour=12, minute=0, day_of_week='mon-fri', id='paper_monitor_noon')
+    def paper_monitor_noon():
+        print(f'[{datetime.now()}] 执行模拟盘午间检查...')
+        from scripts.paper_monitor import send_status_check, check_abnormal_conditions
+        check_abnormal_conditions()
+        send_status_check()
+
+    # 模拟盘监控 (交易日 15:30 - 收盘总结)
+    @scheduler.scheduled_job('cron', hour=15, minute=30, day_of_week='mon-fri', id='paper_monitor_daily')
+    def paper_monitor_daily_summary():
+        print(f'[{datetime.now()}] 执行模拟盘每日总结...')
+        from scripts.paper_monitor import send_daily_summary
+        send_daily_summary()
+
     print('已注册的定时任务:')
     for job in scheduler.get_jobs():
         print(f'  - {job.name}: {job.trigger}')
