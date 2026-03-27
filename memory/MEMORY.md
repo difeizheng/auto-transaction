@@ -224,6 +224,19 @@ python start_services.py scheduler
 ## 服务端口
 - Web 界面：8801
 
+## 数据源清单
+| 数据源 | 内容 | 更新频率 | 延迟 | 成本 |
+|--------|------|---------|------|------|
+| Tushare Pro | 日线行情 | T+1 盘后 | 1 天 | 199 元/年 |
+| 新浪财经 | 实时报价 | 盘中 10 秒轮询 | 3-5 秒 | 免费 |
+| 策略模块 | 监控信号 | 盘中 5 分钟 | 实时 | - |
+
+## 当前数据状态 (2026-03-25)
+- **daily_quotes**: 31,139 条，日期范围 2023-03-24 ~ 2026-03-25
+- **monitoring_details**: 5 条，最新 2026-03-25 21:31:16
+- **monitoring_logs**: 1 条
+- **realtime_quotes**: 0 条（需交易时段运行才有数据）
+
 ## 已知问题
 - requests 库版本警告（不影响功能）
 - 调度器任务需交易日才执行
@@ -725,3 +738,99 @@ CREATE TABLE monitoring_logs (
 - 交易执行时自动发送钉钉通知
 - 配置文件：`src/utils/dingtalk_notifier.py`
 - 配置项：`ENABLE_DINGDING_NOTIFY`, `DINGDING_WEBHOOK`, `DINGDING_SECRET`
+
+---
+
+## 2026-03-25 实盘交易系统 Phase 1 完成
+
+### 新增模块 (4 个核心模块)
+1. **`src/data_collector/sina_client.py`** - 新浪财经实时行情客户端
+   - HTTP 轮询获取实时报价，延迟 3-5 秒
+   - 支持频率控制和格式转换
+
+2. **`src/trader/easytrader_broker.py`** - easytrader 券商接口封装
+   - 支持华泰、银河、国金、中金等券商
+   - 封装模拟登录和交易下单
+
+3. **`src/trader/realtime_monitor.py`** - 实时监控和异常检测
+   - 价格波动、数据延迟、网络异常监控
+   - 四级告警：INFO/WARNING/ERROR/CRITICAL
+
+4. **`src/trader/emergency_handler.py`** - 紧急止损和熔断机制
+   - 单只股票/组合/单日亏损阈值触发
+   - 冷却期控制，避免重复触发
+
+### 运行脚本
+- `run_paper_trading.py` - 模拟盘运行脚本（自动重启、钉钉通知）
+- `check_paper_status.py` - 模拟盘状态快速检查
+
+### 配置文件
+- `config/broker_config.json.example` - 券商配置模板
+- `.env.example` - 环境变量模板
+- `docs/实盘交易指南.md` - 实盘交易使用指南
+- `docs/模拟盘运行报告.md` - 模拟盘运行报告模板
+
+### Web 可视化增强
+新增图表:
+- **信号得分分布柱状图** - 5 区间分布（强买入/买入/观望/弱势/极弱）
+- **因子趋势分析图** - 6 因子历史趋势（3/7/14/30 天切换）
+- **监控告警历史列表** - 按得分颜色标识（绿/黄/红）
+
+新增 API:
+- `/api/monitoring/signal-distribution` - 信号分布统计
+- `/api/monitoring/factor-trend` - 因子趋势数据
+- `/api/monitoring/alerts` - 告警历史列表
+- `/api/monitoring/stock-correlation` - 股票相关性矩阵
+
+### 数据库变更
+- `realtime_quotes` 表 - 实时行情存储（17 字段）
+
+### Bug 修复
+- 回测 API 异常处理 - 确保返回 JSON 格式错误响应
+- `BaseStrategy.generate_signal()` - 支持 `factors` 和 `market_state` 参数
+
+### Git 提交
+- Commit: `bd1546c` - feat: 实盘交易系统 Phase 1 完成 + 监控可视化增强
+- Tag: `v1.1.0-phase1-real-trading`
+
+### 后续计划
+- **模拟盘验证**: 运行 1-2 周，验证系统稳定性
+- **Phase 2**: 分钟数据接入、拆单算法（TWAP/VWAP）、绩效分析
+
+---
+
+## 2026-03-27 策略优化 v4.0 完成
+
+### 核心优化模块 ✅
+1. **夏普比率优化** - 波动率过滤 (4%)、稳定性因子 (0.6)、分级止盈 (8%)
+2. **胜率优化** - 动量因子、资金流分析、强势股筛选 (前 30%)
+3. **多策略组合框架** - 最优 + 趋势跟踪 + 均值回归三策略
+4. **市场状态判断增强** - MACD (25% 权重) + RSI (15% 权重)，6 档市场状态
+5. **模拟盘监控系统** - 钉钉通知、异常告警 (12:00 检查、15:30 总结)
+
+### 回测结果
+| 周期 | 最佳策略 | 夏普比率 | 年化收益 | 胜率 | 最大回撤 |
+|------|----------|----------|----------|------|----------|
+| 2 年 | 多策略 (equal) | 0.88 | +45.54% | 33.3% | 37.63% |
+| 3 年 | 多策略 (equal) | 0.45 | +1.58% | 28.6% | 51.53% |
+
+### 目标完成度
+- 夏普比率目标 1.0 → 实际 0.88 (2 年)/0.45 (3 年)，未完全达成
+- 胜率目标 55% → 实际 33.3% (2 年)/28.6% (3 年)，未达成
+
+### 新增文件
+- `src/strategy/sharpe_optimizer.py` - 夏普比率优化模块
+- `src/strategy/win_rate_optimizer.py` - 胜率优化模块
+- `src/strategy/multi_strategy_portfolio.py` - 多策略组合框架
+- `src/strategy/mean_reversion.py` - 均值回归策略
+- `src/strategy/trend_follow.py` - 趋势跟踪策略
+- `scripts/paper_monitor.py` - 模拟盘监控系统
+
+### Git 提交
+- Commit: `44fd6b8` - feat: 策略优化 v4.0 - 夏普比率 + 胜率优化 + 多策略组合
+- Tag: `v4.0`
+
+### 后续优化方向
+- 止损优化 (收紧至 3-3.5%)
+- 参数调优 (针对不同市场周期)
+- 基本面因子增强 (PE/PB/ROE)
