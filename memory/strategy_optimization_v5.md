@@ -1,8 +1,10 @@
 ---
 name: 策略优化 v5.0 成果
-description: 2026-03-30 完成的策略优化 v5.0 核心成果和回测结果
+description: 2026-03-30 完成的策略优化 v5.0 核心成果、回测结果和代码提交
 type: project
 ---
+
+**优化时间**: 2026-03-30
 
 **优化内容**：
 1. 夏普比率优化 - 波动率过滤 (3.5%)、稳定性因子 (65%)、分级止盈 (10%)
@@ -21,8 +23,16 @@ type: project
 - src/strategy/sharpe_optimizer.py - 夏普比率优化模块
 - src/strategy/win_rate_optimizer.py - 胜率优化模块
 - scripts/strategy_v5_backtest.py - v5.0 回测对比测试脚本
+- docs/strategy_v5_report.md - v5.0 优化报告
+- README.md - 完整系统功能说明和部署指南
+
+**Git 提交**:
+- Commit: `9b394d0` - feat: 策略优化 v5.0 - 夏普增强 + 基本面因子 + 多策略验证
+- Tag: `v1.3.0` - 策略优化 v5.0 版本标签
+- 推送状态：已推送到 GitHub 远程仓库
 
 **后续方向**：
 - 数据完整性验证和参数调试
 - 进一步优化夏普比率至 0.8+
 - 优化胜率至 50%+
+- 年化收益目标 15%+

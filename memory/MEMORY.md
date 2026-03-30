@@ -2,7 +2,7 @@
 
 ## 项目信息
 - 仓库：https://github.com/difeizheng/auto-transaction
-- 版本：1.0
+- 版本：2.0.0 (2026-03-30 重构版)
 - 启动时间：2026-03-19
 
 ## 快速启动命令
@@ -845,3 +845,4 @@ CREATE TABLE monitoring_logs (
 - [策略优化 v4.0 成果](strategy_optimization_v4.md) — 2026-03-27 完成的策略优化 v4.0 核心成果和回测结果
 - [策略优化 v5.0 成果](strategy_optimization_v5.md) — 2026-03-30 完成的策略优化 v5.0：夏普增强 (3.20% 年化)、基本面因子增强、多策略组合验证
 - [项目架构分析与改进建议](architecture_analysis.md) — 2026-03-29 进行的架构评估，识别8个关键问题并提出改进建议
+- [系统重构 v2.0](system_refactor_v2.md) — 2026-03-30 完成的系统重构：实时价格+T+1规则+信号分离+Web监控
