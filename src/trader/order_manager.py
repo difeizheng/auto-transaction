@@ -87,6 +87,7 @@ class Position:
     market_value: float = 0.0
     profit_loss: float = 0.0
     profit_ratio: float = 0.0
+    buy_date: str = ""  # T+1 规则：买入日期 (YYYYMMDD)
 
     def update_price(self, price: float):
         """更新当前价格"""
@@ -94,6 +95,28 @@ class Position:
         self.market_value = price * self.volume
         self.profit_loss = (price - self.avg_cost) * self.volume
         self.profit_ratio = (price / self.avg_cost - 1) if self.avg_cost > 0 else 0
+
+    def can_sell(self, current_date: str) -> tuple:
+        """
+        检查是否可以卖出（T+1 规则）
+
+        Args:
+            current_date: 当前日期 (YYYYMMDD)
+
+        Returns:
+            (can_sell: bool, reason: str)
+        """
+        if not self.buy_date:
+            # 无买入日期记录，保守起见不允许卖出
+            return False, "无买入记录"
+
+        # 同一交易日不能卖出
+        if self.buy_date == current_date:
+            return False, f"T+1限制：{self.buy_date} 买入，当日不可卖出"
+
+        # 简单检查：买入日期 < 当前日期即为不同交易日
+        # 实际应考虑节假日因素
+        return True, ""
 
     def to_dict(self) -> Dict:
         """转换为字典"""
@@ -104,7 +127,8 @@ class Position:
             'current_price': self.current_price,
             'market_value': self.market_value,
             'profit_loss': self.profit_loss,
-            'profit_ratio': self.profit_ratio
+            'profit_ratio': self.profit_ratio,
+            'buy_date': self.buy_date
         }
 
 
@@ -186,7 +210,8 @@ class OrderManager:
                     current_price=row.get('current_price', 0),
                     market_value=row.get('market_value', 0),
                     profit_loss=row.get('profit_loss', 0),
-                    profit_ratio=row.get('profit_ratio', 0)
+                    profit_ratio=row.get('profit_ratio', 0),
+                    buy_date=row.get('buy_date', '')
                 )
 
     def _save_account(self):
@@ -207,8 +232,8 @@ class OrderManager:
         """保存持仓到数据库"""
         self.db.execute("""
             INSERT OR REPLACE INTO positions
-            (ts_code, volume, avg_cost, current_price, market_value, profit_loss, profit_ratio, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+            (ts_code, volume, avg_cost, current_price, market_value, profit_loss, profit_ratio, buy_date, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
         """, (
             position.ts_code,
             position.volume,
@@ -216,7 +241,8 @@ class OrderManager:
             position.current_price,
             position.market_value,
             position.profit_loss,
-            position.profit_ratio
+            position.profit_ratio,
+            position.buy_date
         ))
 
     def _delete_position(self, ts_code: str):
@@ -265,6 +291,13 @@ class OrderManager:
                 trader_logger.warning(
                     f"持仓不足：{ts_code} 需要{volume}, 持有{self.positions[ts_code].volume}"
                 )
+                return None
+
+            # T+1 检查
+            current_date = datetime.now().strftime('%Y%m%d')
+            can_sell, reason = self.positions[ts_code].can_sell(current_date)
+            if not can_sell:
+                trader_logger.warning(f"T+1限制：{ts_code} - {reason}")
                 return None
 
         # 创建订单
@@ -375,6 +408,7 @@ class OrderManager:
 
         # 更新持仓
         ts_code = order.ts_code
+        current_date = datetime.now().strftime('%Y%m%d')
 
         if order.direction == 'buy':
             if ts_code in self.positions:
@@ -383,11 +417,14 @@ class OrderManager:
                 new_value = filled_price * filled_volume
                 pos.volume += filled_volume
                 pos.avg_cost = (old_value + new_value) / pos.volume if pos.volume > 0 else filled_price
+                # 更新买入日期为最新一次买入日期
+                pos.buy_date = current_date
             else:
                 self.positions[ts_code] = Position(
                     ts_code=ts_code,
                     volume=filled_volume,
-                    avg_cost=filled_price
+                    avg_cost=filled_price,
+                    buy_date=current_date  # 记录买入日期
                 )
 
             # 扣除资金

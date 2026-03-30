@@ -244,6 +244,7 @@ class Database:
                     market_value REAL,
                     profit_loss REAL,
                     profit_ratio REAL,
+                    buy_date TEXT,
                     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
             """,
@@ -348,9 +349,30 @@ class Database:
 db = Database()
 
 
+def run_migrations():
+    """数据库迁移 - 添加缺失的列"""
+    try:
+        # 检查并添加 buy_date 列到 positions 表
+        conn = sqlite3.connect(db.db_path)
+        cursor = conn.cursor()
+
+        # 获取 positions 表的列列表
+        cursor.execute("PRAGMA table_info(positions)")
+        columns = [row[1] for row in cursor.fetchall()]
+
+        if 'buy_date' not in columns:
+            cursor.execute("ALTER TABLE positions ADD COLUMN buy_date TEXT")
+            print("迁移：已添加 buy_date 列到 positions 表")
+
+        conn.close()
+    except Exception as e:
+        print(f"迁移检查失败: {e}")
+
+
 def init_db():
     """初始化数据库"""
     db.create_tables()
+    run_migrations()  # 执行迁移
     print("数据库初始化完成!")
 
 
