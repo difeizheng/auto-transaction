@@ -87,22 +87,41 @@ EXTENDED_STOCK_POOL = [
     '600030.SH', '601668.SH'
 ]
 
-# 基本面过滤条件 (增强版)
+# 基本面过滤条件 (增强版 - v5.0)
 FUNDAMENTAL_FILTERS = {
     'max_pe': 50,        # 市盈率 < 50
     'min_roe': 0.05,     # ROE > 5%
     'min_revenue_growth': 0.0,  # 营收增长 > 0
     'max_debt_ratio': 0.70,     # 资产负债率 < 70%
     'min_market_cap': 5000000000,  # 最小市值 50 亿
+    # v5.0 新增
+    'excellent_roe': 0.20,        # 优秀 ROE 20%
+    'min_profit_growth': 0.0,     # 最小利润增长 0%
+    'max_pb': 10,                 # 最大 PB 10
+    'min_current_ratio': 1.0,     # 最小流动比率 1.0
+    'roe_stability_window': 4,    # ROE 稳定性计算窗口 (季度数)
 }
 
-# 调仓周期配置
+# 基本面因子权重 (v5.0 新增)
+FUNDAMENTAL_FACTOR_WEIGHTS = {
+    'roe_weight': 0.30,       # ROE 权重 30%
+    'growth_weight': 0.25,    # 增长权重 25%
+    'value_weight': 0.20,     # 估值权重 20%
+    'health_weight': 0.15,    # 健康权重 15%
+    'size_weight': 0.10,      # 市值权重 10%
+}
+
+# 调仓周期配置 (增强版 - v5.0)
 REBALANCE_CONFIG = {
     'enabled': True,              # 启用定期调仓
     'frequency': 'monthly',       # 调仓频率：weekly/monthly/quarterly
     'max_turnover_ratio': 0.30,   # 单次最大调仓比例 30%
     'holding_period_min': 5,      # 最小持有期 (交易日)
     'holding_period_max': 60,     # 最大持有期 (交易日)
+    # v5.0 新增
+    'rebalance_on_signal': True,  # 信号触发时调仓
+    'fundamental_rebalance_threshold': 0.3,  # 基本面评分下降 30% 时调仓
+    'check_fundamental_on_entry': True,  # 入场前检查基本面
 }
 
 # ============ 通知配置 ============

@@ -12,6 +12,7 @@ from src.strategy.base_strategy import BaseStrategy, Signal
 from src.utils.helpers import calculate_macd, calculate_rsi, calculate_bollinger_bands
 from src.strategy.sharpe_optimizer import SharpeOptimizer, SharpeOptimizationConfig
 from src.strategy.win_rate_optimizer import WinRateOptimizer, WinRateOptimizationConfig, create_win_rate_optimizer
+from src.strategy.fundamental_factors import FundamentalFactorAnalyzer, FundamentalFactorConfig, create_fundamental_analyzer
 from config.logging_config import strategy_logger
 
 
@@ -78,16 +79,32 @@ class OptimalStrategyParams:
 
     # v3.0 新增：夏普优化
     use_sharpe_optimization: bool = True  # 启用夏普优化
-    max_volatility_threshold: float = 0.04  # 最大波动率阈值 4%
-    min_stability_threshold: float = 0.6  # 最小稳定性阈值
-    profit_lock_trigger: float = 0.08  # 利润锁定触发点 8%
+    max_volatility_threshold: float = 0.035  # 最大波动率阈值 3.5% (收紧)
+    min_stability_threshold: float = 0.65  # 最小稳定性阈值 65% (提高)
+    profit_lock_trigger: float = 0.10  # 利润锁定触发点 10% (提高)
+
+    # v5.0 夏普优化增强
+    use_enhanced_sharpe: bool = True  # 启用增强夏普优化
+    min_stability_r_squared: float = 0.5  # 最小 R 平方值 (趋势稳定性)
+    profit_lock_ratio: float = 0.5  # 分级止盈比例 50%
 
     # v4.0 新增：胜率优化
     use_win_rate_optimization: bool = True  # 启用胜率优化
-    min_momentum_score: float = 0.03  # 最小动量得分
-    min_money_flow_score: float = 0  # 最小资金流得分
-    min_stock_strength_rank: float = 0.3  # 最小股票强度排名 (前 30%)
-    min_signal_confidence: float = 0.6  # 最小信号置信度
+    min_momentum_score: float = 0.02  # 最小动量得分 (降低阈值)
+    min_money_flow_score: float = -0.05  # 最小资金流得分 (允许小幅流出)
+    min_stock_strength_rank: float = 0.35  # 最小股票强度排名 (前 35%)
+    min_signal_confidence: float = 0.55  # 最小信号置信度 (降低)
+
+    # v5.0 胜率优化增强
+    use_enhanced_win_rate: bool = True  # 启用增强胜率优化
+    min_momentum_continuous_days: int = 3  # 最小连续上涨天数
+    add_momentum_to_signal_score: float = 1.0  # 动量因子额外加分权重
+    add_flow_to_signal_score: float = 1.0  # 资金流额外加分权重
+
+    # v5.0 新增：基本面因子
+    use_fundamental_factor: bool = True  # 启用基本面因子
+    min_fundamental_score: float = 0.5  # 最小基本面综合得分
+    fundamental_weight_in_signal: float = 0.15  # 基本面在信号中的权重
 
 
 class OptimalStrategy(BaseStrategy):
@@ -131,6 +148,27 @@ class OptimalStrategy(BaseStrategy):
             self.win_rate_optimizer = create_win_rate_optimizer()
         else:
             self.win_rate_optimizer = None
+
+        # v5.0: 初始化基本面因子分析器
+        if self.params.use_fundamental_factor:
+            fundamental_config = FundamentalFactorConfig(
+                min_roe=0.05,
+                excellent_roe=0.20,
+                min_revenue_growth=0.0,
+                min_profit_growth=0.0,
+                max_pe=50,
+                max_pb=10,
+                max_debt_ratio=0.70,
+                min_market_cap=5e9,
+                roe_weight=0.30,
+                growth_weight=0.25,
+                value_weight=0.20,
+                health_weight=0.15,
+                size_weight=0.10,
+            )
+            self.fundamental_analyzer = FundamentalFactorAnalyzer(fundamental_config)
+        else:
+            self.fundamental_analyzer = None
 
     def on_init(self):
         """策略初始化"""

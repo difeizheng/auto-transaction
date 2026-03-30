@@ -834,3 +834,14 @@ CREATE TABLE monitoring_logs (
 - 止损优化 (收紧至 3-3.5%)
 - 参数调优 (针对不同市场周期)
 - 基本面因子增强 (PE/PB/ROE)
+
+---
+
+## 记忆索引
+
+- [用户角色和项目](user_role.md) — 用户开发 A 股量化交易系统，重点关注策略优化和实盘监控
+- [回测脚本偏好](feedback_backtest_preference.md) — 回测测试脚本使用 ASCII 字符而非中文/emoji，避免 Windows GBK 编码问题
+- [策略改进记录](strategy_improvements.md) — 2026-03-20 完成的策略改进和预期效果
+- [策略优化 v4.0 成果](strategy_optimization_v4.md) — 2026-03-27 完成的策略优化 v4.0 核心成果和回测结果
+- [策略优化 v5.0 成果](strategy_optimization_v5.md) — 2026-03-30 完成的策略优化 v5.0：夏普增强 (3.20% 年化)、基本面因子增强、多策略组合验证
+- [项目架构分析与改进建议](architecture_analysis.md) — 2026-03-29 进行的架构评估，识别8个关键问题并提出改进建议
