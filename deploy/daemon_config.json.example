@@ -1,0 +1,10 @@
+{
+  "DingtalkWebhook": "https://oapi.dingtalk.com/robot/send?access_token=your_token_here",
+  "MaxRestarts": 5,
+  "RestartInterval": 60,
+  "CheckInterval": 30,
+  "MemoryThreshold": 500,
+  "NotifyOnStart": true,
+  "NotifyOnStop": true,
+  "NotifyOnRestart": true
+}

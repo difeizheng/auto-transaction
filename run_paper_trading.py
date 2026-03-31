@@ -187,6 +187,10 @@ def run_simulation_day():
     price_cache.subscribe(stock_pool)
     price_cache.start_background_refresh()
 
+    # 启动信号调度器（后台线程）
+    signal_scheduler.start_scheduler(check_interval=60)
+    trader_logger.info("信号调度器已启动")
+
     # 已处理信号记录（防止同一天重复下单）
     processed_signals: Dict[str, Set[str]] = {}
 
@@ -467,6 +471,7 @@ def run_simulation_day():
 
     # 清理
     price_cache.stop_background_refresh()
+    signal_scheduler.stop_scheduler()
     broker.disconnect()
 
     # 发送结束通知

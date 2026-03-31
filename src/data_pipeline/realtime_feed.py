@@ -12,6 +12,7 @@ from config.logging_config import data_logger
 from src.data_collector.sina_client import sina_client
 from src.data_collector.sohu_client import tencent_client
 from src.data_collector.tushare_client import ts_client
+from src.utils.database import Database
 
 
 class RealtimePriceCache:
@@ -33,8 +34,8 @@ class RealtimePriceCache:
         self._last_fetch_time: Dict[str, float] = {}
 
         # 数据源
-        self._current_source = "Sina"
-        self._fallback_source = "Tencent"  # 腾讯财经作为备用
+        self._current_source = "Tencent"
+        self._fallback_source = "Sina"  # Sina 作为备用
 
         data_logger.info(f"RealtimePriceCache 初始化完成，刷新间隔: {refresh_interval}秒")
 
@@ -98,6 +99,93 @@ class RealtimePriceCache:
             price_data['_fetch_time'] = time.time()
             self._prices[ts_code] = price_data
 
+    def _is_trading_hours(self) -> bool:
+        """
+        判断当前是否在交易时段
+
+        交易时间:
+        - 上午: 09:30 - 11:30
+        - 下午: 13:00 - 15:00
+        - 工作日: 周一到周五
+
+        Returns:
+            是否在交易时段
+        """
+        now = datetime.now()
+
+        # 周末不交易
+        if now.weekday() >= 5:  # 5=周六, 6=周日
+            return False
+
+        # 检查是否在交易时间内
+        current_time = now.time()
+        morning_start = datetime.strptime("09:30", "%H:%M").time()
+        morning_end = datetime.strptime("11:30", "%H:%M").time()
+        afternoon_start = datetime.strptime("13:00", "%H:%M").time()
+        afternoon_end = datetime.strptime("15:00", "%H:%M").time()
+
+        in_morning = morning_start <= current_time <= morning_end
+        in_afternoon = afternoon_start <= current_time <= afternoon_end
+
+        return in_morning or in_afternoon
+
+    def _fetch_prices_from_db(self, ts_codes: List[str]):
+        """
+        从数据库获取最新收盘价（非交易时段降级方案）
+
+        Args:
+            ts_codes: 股票代码列表
+        """
+        try:
+            db = Database()
+            from datetime import timedelta
+
+            # 获取最近交易日的数据
+            today = datetime.now().date()
+
+            # 查询最近一个交易日的收盘价
+            query = f"""
+            SELECT ts_code, close as price, pre_close, pct_chg,
+                   open, high, low, vol as volume, amount,
+                   trade_date as update_time
+            FROM daily_quotes
+            WHERE ts_code IN ({','.join(['?'] * len(ts_codes))})
+            AND trade_date = (
+                SELECT MAX(trade_date) FROM daily_quotes
+                WHERE trade_date <= ?
+            )
+            """
+
+            with db.get_connection() as conn:
+                import pandas as pd
+                df = pd.read_sql_query(query, conn, params=ts_codes + [today.isoformat()])
+
+                if not df.empty:
+                    for _, row in df.iterrows():
+                        self.update_price(row['ts_code'], {
+                            'price': row.get('price', 0),
+                            'pre_close': row.get('pre_close', 0),
+                            'pct_chg': row.get('pct_chg', 0),
+                            'open': row.get('open', 0),
+                            'high': row.get('high', 0),
+                            'low': row.get('low', 0),
+                            'volume': row.get('volume', 0),
+                            'amount': row.get('amount', 0),
+                            'bid': 0,
+                            'ask': 0,
+                            'bid_volume': 0,
+                            'ask_volume': 0,
+                            'name': '',
+                            'source': 'DB_Cache',
+                            'update_time': str(row.get('update_time', today.isoformat()))
+                        })
+                    data_logger.debug(f"[DataFeed] 从数据库获取 {len(df)} 只股票缓存价格")
+                    return True
+        except Exception as e:
+            data_logger.warning(f"从数据库获取价格失败: {e}")
+
+        return False
+
     def _fetch_prices(self, ts_codes: List[str]):
         """
         从数据源获取价格（内部使用）
@@ -108,35 +196,7 @@ class RealtimePriceCache:
         if not ts_codes:
             return
 
-        # 优先使用 Sina
-        try:
-            df = sina_client.get_realtime_quotes(ts_codes)
-            if not df.empty:
-                self._current_source = "Sina"
-                for _, row in df.iterrows():
-                    self.update_price(row['ts_code'], {
-                        'price': row.get('price', 0),
-                        'pre_close': row.get('pre_close', 0),
-                        'pct_chg': row.get('pct_chg', 0),
-                        'open': row.get('open', 0),
-                        'high': row.get('high', 0),
-                        'low': row.get('low', 0),
-                        'volume': row.get('volume', 0),
-                        'amount': row.get('amount', 0),
-                        'bid': row.get('bid', 0),
-                        'ask': row.get('ask', 0),
-                        'bid_volume': row.get('bid_volume', 0),
-                        'ask_volume': row.get('ask_volume', 0),
-                        'name': row.get('name', ''),
-                        'source': 'Sina',
-                        'update_time': row.get('update_time', datetime.now().strftime('%Y-%m-%d %H:%M:%S'))
-                    })
-                data_logger.debug(f"[DataFeed] Sina 获取 {len(df)} 只股票实时价格")
-                return
-        except Exception as e:
-            data_logger.warning(f"Sina 数据获取失败: {e}")
-
-        # Fallback 1: 使用腾讯财经备用数据源
+        # 优先使用腾讯财经（主数据源）
         try:
             df = tencent_client.get_realtime_quotes(ts_codes)
             if not df.empty:
@@ -159,13 +219,42 @@ class RealtimePriceCache:
                         'source': 'Tencent',
                         'update_time': row.get('update_time', datetime.now().strftime('%Y-%m-%d %H:%M:%S'))
                     })
-                data_logger.info(f"[DataFeed] 使用腾讯备用数据 {len(df)} 只股票")
+                data_logger.debug(f"[DataFeed] 腾讯获取 {len(df)} 只股票实时价格")
                 return
         except Exception as e:
-            data_logger.warning(f"腾讯数据获取失败：{e}")
+            data_logger.warning(f"腾讯数据获取失败: {e}")
+
+        # Fallback: 使用 Sina 备用数据源
+        try:
+            df = sina_client.get_realtime_quotes(ts_codes)
+            if not df.empty:
+                self._current_source = "Sina"
+                for _, row in df.iterrows():
+                    self.update_price(row['ts_code'], {
+                        'price': row.get('price', 0),
+                        'pre_close': row.get('pre_close', 0),
+                        'pct_chg': row.get('pct_chg', 0),
+                        'open': row.get('open', 0),
+                        'high': row.get('high', 0),
+                        'low': row.get('low', 0),
+                        'volume': row.get('volume', 0),
+                        'amount': row.get('amount', 0),
+                        'bid': row.get('bid', 0),
+                        'ask': row.get('ask', 0),
+                        'bid_volume': row.get('bid_volume', 0),
+                        'ask_volume': row.get('ask_volume', 0),
+                        'name': row.get('name', ''),
+                        'source': 'Sina',
+                        'update_time': row.get('update_time', datetime.now().strftime('%Y-%m-%d %H:%M:%S'))
+                    })
+                data_logger.info(f"[DataFeed] 使用 Sina 备用数据 {len(df)} 只股票")
+                return
+        except Exception as e:
+            data_logger.warning(f"Sina 数据获取失败: {e}")
 
         # Fallback 2: 使用数据库缓存
-        data_logger.warning(f"Sina 和腾讯都获取失败，将使用数据库缓存价格")
+        data_logger.warning(f"腾讯和 Sina 都获取失败，将使用数据库缓存价格")
+        self._fetch_prices_from_db(ts_codes)
 
     def start_background_refresh(self):
         """启动后台刷新线程"""
@@ -193,12 +282,17 @@ class RealtimePriceCache:
                     codes_to_fetch = list(self._subscribed_codes)
 
                 if codes_to_fetch:
-                    # 分批获取，避免请求过多
-                    batch_size = 20
-                    for i in range(0, len(codes_to_fetch), batch_size):
-                        batch = codes_to_fetch[i:i + batch_size]
-                        self._fetch_prices(batch)
-                        time.sleep(1)  # 批次间延迟
+                    # 判断是否在交易时段
+                    if not self._is_trading_hours():
+                        data_logger.debug("非交易时段，从数据库获取缓存价格")
+                        self._fetch_prices_from_db(codes_to_fetch)
+                    else:
+                        # 交易时段，分批获取实时数据
+                        batch_size = 20
+                        for i in range(0, len(codes_to_fetch), batch_size):
+                            batch = codes_to_fetch[i:i + batch_size]
+                            self._fetch_prices(batch)
+                            time.sleep(1)  # 批次间延迟
 
             except Exception as e:
                 data_logger.error(f"后台刷新异常: {e}")
