@@ -2,14 +2,6 @@
 信号与交易页面
 显示今日信号、信号历史、成交记录
 """
-import sys
-from pathlib import Path
-
-# 添加项目根目录到 Python 路径
-PROJECT_ROOT = Path(__file__).parent.parent.parent.absolute()
-if str(PROJECT_ROOT) not in sys.path:
-    sys.path.insert(0, str(PROJECT_ROOT))
-
 import streamlit as st
 from datetime import datetime, timedelta
 from streamlit_autorefresh import st_autorefresh

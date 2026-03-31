@@ -374,25 +374,25 @@ data_fetcher = DataFetcher()
 
 # ========== 缓存函数 ==========
 
-@st.cache_data(ttl=5)
+@st.cache_data(ttl=30)
 def get_account_info_cached():
     """获取账户信息（缓存）"""
     return data_fetcher.get_account_info()
 
 
-@st.cache_data(ttl=5)
+@st.cache_data(ttl=30)
 def get_positions_cached():
     """获取持仓（缓存）"""
     return data_fetcher.get_positions()
 
 
-@st.cache_data(ttl=5)
+@st.cache_data(ttl=30)
 def get_signals_cached(days: int = 7, status: str = None):
     """获取信号（缓存）"""
     return data_fetcher.get_signals(days, status)
 
 
-@st.cache_data(ttl=5)
+@st.cache_data(ttl=30)
 def get_today_stats_cached():
     """获取今日统计（缓存）"""
     return data_fetcher.get_today_stats()

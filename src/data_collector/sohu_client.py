@@ -12,7 +12,6 @@ import time
 import re
 
 from config.logging_config import data_logger
-from src.utils.database import db
 
 
 class TencentClient:

@@ -11,6 +11,7 @@ import subprocess
 import streamlit as st
 
 from streamlit_monitor.config import LOG_DIR
+from streamlit_monitor.utils.log_parser import LogParser
 
 
 class SystemInfo:
@@ -18,6 +19,7 @@ class SystemInfo:
 
     def __init__(self):
         self.is_windows = platform.system() == 'Windows'
+        self.log_parser = LogParser()
 
     def get_python_processes(self) -> List[Dict]:
         """获取所有 Python 进程"""
@@ -97,14 +99,7 @@ class SystemInfo:
 
     def get_latest_paper_trading_log(self) -> Optional[Path]:
         """获取最新的纸交易日志"""
-        pattern = "paper_trading_*.log"
-        files = list(LOG_DIR.glob(pattern))
-
-        if not files:
-            return None
-
-        files.sort(key=lambda x: x.stat().st_mtime, reverse=True)
-        return files[0]
+        return self.log_parser.get_latest_paper_trading_log()
 
     def get_system_status(self) -> Dict:
         """获取系统状态"""

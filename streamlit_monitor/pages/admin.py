@@ -2,15 +2,7 @@
 系统管理页面
 显示进程状态、日志查看器、系统控制
 """
-import sys
 import os
-from pathlib import Path
-
-# 添加项目根目录到 Python 路径
-PROJECT_ROOT = Path(__file__).parent.parent.parent.absolute()
-if str(PROJECT_ROOT) not in sys.path:
-    sys.path.insert(0, str(PROJECT_ROOT))
-
 import streamlit as st
 from datetime import datetime
 from streamlit_autorefresh import st_autorefresh
