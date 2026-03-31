@@ -5,6 +5,7 @@
       "cron": "0 9 * * 1-5",
       "prompt": "检查模拟盘运行状态：\n1. 读取 run_paper_trading.py 的输出日志\n2. 检查是否有错误\n3. 报告当前模拟盘状态（总资产、持仓数、成交笔数）",
       "createdAt": 1774450729018,
+      "lastFiredAt": 1774932709958,
       "recurring": true
     }
   ]

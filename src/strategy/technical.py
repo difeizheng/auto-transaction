@@ -58,14 +58,20 @@ class TechnicalStrategy(BaseStrategy):
             if ts_code not in self.price_history:
                 self.price_history[ts_code] = pd.DataFrame()
 
+            # 处理 bar 可能是 Series 或 dict 的情况
+            def safe_float(value):
+                if isinstance(value, pd.Series):
+                    return float(value.iloc[0]) if len(value) > 0 else 0.0
+                return float(value) if value else 0.0
+
             new_row = pd.DataFrame([{
                 'trade_date': current_date,
-                'open': float(bar.get('open', 0)),
-                'high': float(bar.get('high', 0)),
-                'low': float(bar.get('low', 0)),
-                'close': float(bar.get('close', 0)),
-                'vol': float(bar.get('vol', 0)),
-                'amount': float(bar.get('amount', 0))
+                'open': safe_float(bar.get('open', 0)),
+                'high': safe_float(bar.get('high', 0)),
+                'low': safe_float(bar.get('low', 0)),
+                'close': safe_float(bar.get('close', 0)),
+                'vol': safe_float(bar.get('vol', 0)),
+                'amount': safe_float(bar.get('amount', 0))
             }])
 
             self.price_history[ts_code] = pd.concat(

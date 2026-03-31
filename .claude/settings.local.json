@@ -29,7 +29,23 @@
       "Bash(findstr python:*)",
       "Bash(Stop-Process -Id 32652 -Force)",
       "Bash(pkill -f \"python.*web_server.py\")",
-      "Bash(sqlite3:*)"
+      "Bash(sqlite3:*)",
+      "Bash(timeout /t 10 /nobreak)",
+      "Bash(ls:*)",
+      "Bash(find C:/Users/58452/.claude/projects/D--project-room-workspace2024-mytest-auto-transaction/memory/ -type f -name *.md)",
+      "Bash(find D:project_roomworkspace2024mytestauto-transactiondata -name *.db)",
+      "Bash(find D:project_roomworkspace2024mytestauto-transaction -name *.db)",
+      "Bash(find . -name *paper* -type f)",
+      "Bash(grep -E \"\\\\.\\(log|txt\\)$\")",
+      "Bash(grep -E \"\\\\.py$\")",
+      "Bash(xargs -r kill)",
+      "Bash(xargs -r kill -9)",
+      "Bash(xargs kill:*)",
+      "Bash(head -20 logs/paper_trading_20260331_14*.log)",
+      "Bash(tail -n 30 logs/paper_trading_*.log)",
+      "Bash(tail -n 20 logs/web_api_*.log)",
+      "Bash(findstr -i streamlit)",
+      "Bash(findstr -i \"streamlit\\\\|python\")"
     ]
   }
 }

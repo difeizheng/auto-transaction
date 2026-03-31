@@ -10,18 +10,19 @@ from collections import defaultdict
 
 from config.logging_config import data_logger
 from src.data_collector.sina_client import sina_client
+from src.data_collector.sohu_client import tencent_client
 from src.data_collector.tushare_client import ts_client
 
 
 class RealtimePriceCache:
     """实时价格缓存（线程安全）"""
 
-    def __init__(self, refresh_interval: float = 10.0):
+    def __init__(self, refresh_interval: float = 30.0):
         """
         初始化实时价格缓存
 
         Args:
-            refresh_interval: 刷新间隔（秒），默认 10 秒
+            refresh_interval: 刷新间隔（秒），默认 30 秒（优化后，避免 API 限流）
         """
         self.refresh_interval = refresh_interval
         self._prices: Dict[str, Dict] = {}  # {ts_code: {price, pre_close, pct_chg, update_time}}
@@ -33,7 +34,7 @@ class RealtimePriceCache:
 
         # 数据源
         self._current_source = "Sina"
-        self._fallback_source = "Tushare"
+        self._fallback_source = "Tencent"  # 腾讯财经作为备用
 
         data_logger.info(f"RealtimePriceCache 初始化完成，刷新间隔: {refresh_interval}秒")
 
@@ -135,33 +136,36 @@ class RealtimePriceCache:
         except Exception as e:
             data_logger.warning(f"Sina 数据获取失败: {e}")
 
-        # Fallback: 使用 Tushare（取最新日线收盘价作为参考）
+        # Fallback 1: 使用腾讯财经备用数据源
         try:
-            for ts_code in ts_codes:
-                df = ts_client.get_daily_quotes(ts_code=ts_code, save_to_db=False)
-                if not df.empty:
-                    latest = df.iloc[-1]
-                    self.update_price(ts_code, {
-                        'price': float(latest.get('close', 0)),
-                        'pre_close': float(latest.get('pre_close', latest.get('close', 0))),
-                        'pct_chg': 0.0,  # Tushare 日线不提供实时涨跌幅
-                        'open': float(latest.get('open', 0)),
-                        'high': float(latest.get('high', 0)),
-                        'low': float(latest.get('low', 0)),
-                        'volume': float(latest.get('vol', 0)),
-                        'amount': float(latest.get('amount', 0)),
-                        'bid': 0,
-                        'ask': 0,
-                        'bid_volume': 0,
-                        'ask_volume': 0,
-                        'name': '',
-                        'source': 'Tushare',
-                        'update_time': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+            df = tencent_client.get_realtime_quotes(ts_codes)
+            if not df.empty:
+                self._current_source = "Tencent"
+                for _, row in df.iterrows():
+                    self.update_price(row['ts_code'], {
+                        'price': row.get('price', 0),
+                        'pre_close': row.get('pre_close', 0),
+                        'pct_chg': row.get('pct_chg', 0),
+                        'open': row.get('open', 0),
+                        'high': row.get('high', 0),
+                        'low': row.get('low', 0),
+                        'volume': row.get('volume', 0),
+                        'amount': row.get('amount', 0),
+                        'bid': row.get('bid', 0),
+                        'ask': row.get('ask', 0),
+                        'bid_volume': row.get('bid_volume', 0),
+                        'ask_volume': row.get('ask_volume', 0),
+                        'name': row.get('name', ''),
+                        'source': 'Tencent',
+                        'update_time': row.get('update_time', datetime.now().strftime('%Y-%m-%d %H:%M:%S'))
                     })
-            self._current_source = "Tushare"
-            data_logger.info(f"[DataFeed] 使用 Tushare 备用数据 {len(ts_codes)} 只股票")
+                data_logger.info(f"[DataFeed] 使用腾讯备用数据 {len(df)} 只股票")
+                return
         except Exception as e:
-            data_logger.error(f"Tushare 备用数据获取也失败: {e}")
+            data_logger.warning(f"腾讯数据获取失败：{e}")
+
+        # Fallback 2: 使用数据库缓存
+        data_logger.warning(f"Sina 和腾讯都获取失败，将使用数据库缓存价格")
 
     def start_background_refresh(self):
         """启动后台刷新线程"""
@@ -223,7 +227,7 @@ class RealtimePriceCache:
 
 
 # 全局实例
-price_cache = RealtimePriceCache(refresh_interval=10.0)
+price_cache = RealtimePriceCache(refresh_interval=30.0)
 
 
 def get_price(ts_code: str) -> Optional[Dict]:

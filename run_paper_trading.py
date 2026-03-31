@@ -69,7 +69,7 @@ def check_market_status() -> str:
 
 def get_current_price(ts_code: str) -> float:
     """
-    获取当前实时价格
+    获取当前实时价格（优化版 - 减少 API 调用）
 
     Args:
         ts_code: 股票代码
@@ -77,15 +77,35 @@ def get_current_price(ts_code: str) -> float:
     Returns:
         当前价格，如果获取失败返回 0
     """
+    # 1. 尝试从实时价格缓存获取（Sina，无 API 限制）
     price_data = get_price(ts_code)
     if price_data and price_data.get('price', 0) > 0:
         return price_data['price']
 
-    # Fallback: 从数据库获取最近收盘价
-    current_date = datetime.now().strftime('%Y%m%d')
-    df = data_manager.get_daily_quotes(ts_code, current_date, current_date)
-    if not df.empty:
-        return float(df.iloc[-1].get('close', 0))
+    # 2. 从数据库获取最近收盘价（无 API 调用）
+    try:
+        df = db.query("""
+            SELECT close FROM daily_quotes
+            WHERE ts_code = ?
+            ORDER BY trade_date DESC
+            LIMIT 1
+        """, (ts_code,))
+
+        if not df.empty:
+            price = float(df.iloc[0]['close'])
+            if price > 0:
+                return price
+    except Exception as e:
+        trader_logger.warning(f"从数据库获取价格失败: {e}")
+
+    # 3. 最后才调用 Tushare（避免限流）
+    try:
+        current_date = datetime.now().strftime('%Y%m%d')
+        df = data_manager.get_daily_quotes(ts_code, current_date, current_date)
+        if not df.empty:
+            return float(df.iloc[-1].get('close', 0))
+    except Exception as e:
+        trader_logger.warning(f"Tushare 获取价格失败: {e}")
 
     trader_logger.warning(f"无法获取 {ts_code} 的价格，使用 0")
     return 0
@@ -310,20 +330,6 @@ def run_simulation_day():
 
                         # 标记本次执行已完成
                         today_signals_generated = True
-                                    )
-
-                                    if order_id:
-                                        stats['trades_executed'] += 1
-                                        record_processed_signal(
-                                            processed_signals, sig.ts_code, sig.direction
-                                        )
-                                        trader_logger.info(
-                                            f"[交易执行] {sig.ts_code} {sig.direction} "
-                                            f"{sig.volume}@{sig_price:.2f} - {order_id}"
-                                        )
-                                else:
-                                    stats['rejected_by_risk'] += 1
-                                    trader_logger.warning(f"风控阻止：{sig.ts_code} - {reason}")
 
                 # === 盘中实时市值更新 ===
                 if now - last_market_update >= market_update_interval:
