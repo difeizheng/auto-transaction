@@ -36,6 +36,9 @@ $script:Config = @{
     DingtalkWebhook = $null  # 在配置文件中设置
 }
 
+# 全局变量存储后台作业
+$script:MonitorJob = $null
+
 # 加载配置文件
 function Load-Config {
     if (Test-Path $ConfigFile) {
@@ -281,18 +284,34 @@ function Main {
     switch ($Action) {
         "start" {
             if (Start-TradingProcess) {
-                # 启动后台监控
-                Start-Job -ScriptBlock ${function:Start-MonitorLoop} | Out-Null
-                Write-Log "后台监控已启动"
+                # 启动后台监控并保存作业引用
+                $script:MonitorJob = Start-Job -ScriptBlock ${function:Start-MonitorLoop}
+                Write-Log "后台监控已启动 (Job ID: $($script:MonitorJob.Id))"
             }
         }
         "stop" {
+            # 停止后台监控作业
+            if ($script:MonitorJob) {
+                Stop-Job $script:MonitorJob -ErrorAction SilentlyContinue
+                Remove-Job $script:MonitorJob -ErrorAction SilentlyContinue
+                $script:MonitorJob = $null
+                Write-Log "后台监控已停止"
+            }
             Stop-TradingProcess
         }
         "restart" {
+            # 停止后台监控作业
+            if ($script:MonitorJob) {
+                Stop-Job $script:MonitorJob -ErrorAction SilentlyContinue
+                Remove-Job $script:MonitorJob -ErrorAction SilentlyContinue
+                $script:MonitorJob = $null
+            }
             Stop-TradingProcess
             Start-Sleep -Seconds 2
-            Start-TradingProcess
+            if (Start-TradingProcess) {
+                $script:MonitorJob = Start-Job -ScriptBlock ${function:Start-MonitorLoop}
+                Write-Log "后台监控已启动 (Job ID: $($script:MonitorJob.Id))"
+            }
         }
         "status" {
             Show-Status

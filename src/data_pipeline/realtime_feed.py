@@ -99,36 +99,6 @@ class RealtimePriceCache:
             price_data['_fetch_time'] = time.time()
             self._prices[ts_code] = price_data
 
-    def _is_trading_hours(self) -> bool:
-        """
-        判断当前是否在交易时段
-
-        交易时间:
-        - 上午: 09:30 - 11:30
-        - 下午: 13:00 - 15:00
-        - 工作日: 周一到周五
-
-        Returns:
-            是否在交易时段
-        """
-        now = datetime.now()
-
-        # 周末不交易
-        if now.weekday() >= 5:  # 5=周六, 6=周日
-            return False
-
-        # 检查是否在交易时间内
-        current_time = now.time()
-        morning_start = datetime.strptime("09:30", "%H:%M").time()
-        morning_end = datetime.strptime("11:30", "%H:%M").time()
-        afternoon_start = datetime.strptime("13:00", "%H:%M").time()
-        afternoon_end = datetime.strptime("15:00", "%H:%M").time()
-
-        in_morning = morning_start <= current_time <= morning_end
-        in_afternoon = afternoon_start <= current_time <= afternoon_end
-
-        return in_morning or in_afternoon
-
     def _fetch_prices_from_db(self, ts_codes: List[str]):
         """
         从数据库获取最新收盘价（非交易时段降级方案）
@@ -283,7 +253,7 @@ class RealtimePriceCache:
 
                 if codes_to_fetch:
                     # 判断是否在交易时段
-                    if not self._is_trading_hours():
+                    if not self.is_market_open():
                         data_logger.debug("非交易时段，从数据库获取缓存价格")
                         self._fetch_prices_from_db(codes_to_fetch)
                     else:

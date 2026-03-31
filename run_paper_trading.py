@@ -29,6 +29,7 @@ from src.strategy.technical import TechnicalStrategy
 from src.data_collector.data_manager import data_manager
 from src.trader.scheduler import TradingScheduler
 from src.utils.dingtalk_notifier import DingTalkNotifier
+from src.utils.database import db
 from src.data_pipeline.realtime_feed import price_cache, get_price
 from src.strategy_engine.signal_scheduler import signal_scheduler, get_pending_signals
 from src.performance import record_daily_performance, get_performance_summary, init_performance_tables
