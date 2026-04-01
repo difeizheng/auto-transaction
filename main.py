@@ -45,10 +45,12 @@ def update_data(days: int = 30, stocks: list = None):
 
     for ts_code in stocks:
         try:
-            data_manager.get_daily_quotes(
+            # 使用 tushare_client 直接获取并保存到数据库
+            data_manager.ts_client.get_daily_quotes(
                 ts_code,
                 start_date.strftime('%Y%m%d'),
-                end_date.strftime('%Y%m%d')
+                end_date.strftime('%Y%m%d'),
+                save_to_db=True
             )
             print(f"  [OK] {ts_code}")
         except Exception as e:

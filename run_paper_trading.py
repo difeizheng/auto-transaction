@@ -192,12 +192,20 @@ def run_simulation_day():
     signal_scheduler.start_scheduler(check_interval=60)
     trader_logger.info("信号调度器已启动")
 
+    # 启动每日数据更新调度器（后台线程）
+    from src.data_pipeline.daily_updater import daily_scheduler
+    daily_scheduler.start()
+    trader_logger.info("每日数据更新调度器已启动")
+
     # 已处理信号记录（防止同一天重复下单）
     processed_signals: Dict[str, Set[str]] = {}
 
     # 今日信号生成标志（14:50 后生成，次日执行）
     today_signals_generated = False
     last_signal_date = ""
+
+    # 今日净值记录标志（防止 15:05-15:10 窗口内重复记录）
+    nav_recorded_today = False
 
     # 发送启动通知
     if settings.ENABLE_DINGDING_NOTIFY:
@@ -381,11 +389,13 @@ def run_simulation_day():
                 now = datetime.now()
                 if now.hour == 8 and now.minute == 30:
                     today_signals_generated = False
+                    nav_recorded_today = False  # 重置净值记录标志
                     trader_logger.info("新交易日开始，重置信号状态")
 
             # === 15:05 每日净值记录 + 钉钉日报 ===
             now = datetime.now()
-            if market_status == "closed" and now.hour == 15 and 5 <= now.minute <= 10:
+            if market_status == "closed" and now.hour == 15 and 5 <= now.minute <= 10 and not nav_recorded_today:
+                nav_recorded_today = True  # 标记今日已记录，防止重复
                 # 记录每日净值
                 account = broker.get_account_info()
                 record_daily_performance(account.get('total_asset', 0))

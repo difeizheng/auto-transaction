@@ -3,11 +3,14 @@
 显示进程状态、日志查看器、系统控制
 """
 import os
+import sys
 import streamlit as st
+import pandas as pd
 from datetime import datetime
+from pathlib import Path
 from streamlit_autorefresh import st_autorefresh
 
-from streamlit_monitor.config import PAGE_CONFIG, REFRESH_INTERVAL, LOG_DIR
+from streamlit_monitor.config import PAGE_CONFIG, REFRESH_INTERVAL, LOG_DIR, PROJECT_ROOT
 from streamlit_monitor.utils import (
     get_system_status_cached,
     get_recent_logs_cached,
@@ -30,23 +33,24 @@ def show():
 
     # ========== 进程监控 ==========
     st.markdown("---")
-    st.subheader("💻 进程状态")
+    st.subheader("💻 系统架构")
 
     system_status = get_system_status_cached()
 
     col1, col2 = st.columns(2)
 
     with col1:
-        # 纸交易进程状态
+        # 主进程状态
         if system_status.get('paper_trading_running'):
-            st.success("✅ 纸交易进程运行中")
+            st.success("✅ 主进程运行中 (run_paper_trading.py)")
         else:
-            st.error("❌ 纸交易进程未运行")
+            st.error("❌ 主进程未运行")
 
         # 进程详情
         process_info = system_status.get('process_info', {})
         if process_info:
-            st.json(process_info)
+            with st.expander("📊 进程详情"):
+                st.json(process_info)
 
     with col2:
         # 系统信息
@@ -57,6 +61,60 @@ def show():
         latest_log = system_status.get('latest_log')
         if latest_log:
             st.caption(f"日志文件: `{Path(latest_log).name}`")
+
+    # 后台线程状态表格
+    st.markdown("#### 🧵 后台线程状态")
+
+    now = datetime.now()
+    current_time = now.time()
+
+    def get_thread_status(thread_name):
+        """根据当前时间判断线程状态"""
+        if thread_name == 'RealtimePriceCache':
+            return '✅ 运行中' if now.weekday() < 5 else '⏸️ 周末休市'
+        elif thread_name == 'SignalScheduler':
+            if now.weekday() >= 5:
+                return '⏸️ 周末休市'
+            elif 14 <= current_time.hour < 15 and current_time.minute >= 50:
+                return '✅ 信号生成中'
+            else:
+                return '⏸️ 等待窗口 (14:50-15:00)'
+        elif thread_name == 'DailyDataUpdater':
+            if now.weekday() >= 5:
+                return '⏸️ 周末休市'
+            elif 16 <= current_time.hour < 17 and current_time.minute >= 10:
+                return '✅ 数据更新中'
+            elif current_time.hour >= 17:
+                return '✔️ 今日已完成'
+            else:
+                return '⏸️ 等待窗口 (16:10-17:00)'
+        return '❓ 未知'
+
+    threads_data = [
+        {
+            '线程名称': 'RealtimePriceCache',
+            '日志文件': 'data_collector.log',
+            '运行时段': '全天 (30秒刷新)',
+            '状态': get_thread_status('RealtimePriceCache')
+        },
+        {
+            '线程名称': 'SignalScheduler',
+            '日志文件': 'trader.log',
+            '运行时段': '14:50-15:00',
+            '状态': get_thread_status('SignalScheduler')
+        },
+        {
+            '线程名称': 'DailyDataUpdater',
+            '日志文件': 'data_collector.log',
+            '运行时段': '16:10-17:00',
+            '状态': get_thread_status('DailyDataUpdater')
+        }
+    ]
+
+    df_threads = pd.DataFrame(threads_data)
+    st.dataframe(df_threads, use_container_width=True, hide_index=True)
+
+    st.caption("💡 提示：部分线程仅在特定时间窗口运行，非运行时段无日志输出属于正常现象")
 
     # ========== 日志查看器 ==========
     st.markdown("---")
@@ -70,6 +128,15 @@ def show():
         index=0,
         key="admin_log_type"
     )
+
+    # 日志说明
+    log_descriptions = {
+        'trader': '📝 主进程日志 + 信号调度器（全天 + 14:50-15:00）',
+        'data_collector': '📝 实时价格缓存（全天 30秒刷新） + 盘后数据更新（16:10-17:00）',
+        'strategy': '📝 策略执行日志（仅在 14:50-15:00 信号生成窗口写入）',
+        'paper_trading': '📝 历史会话日志（按时间戳命名的归档文件）'
+    }
+    st.caption(log_descriptions.get(log_type, ''))
 
     # 获取日志
     logs = get_recent_logs_cached(log_type, 100)
@@ -189,7 +256,20 @@ python web_server.py
         """)
 
     # ========== 刷新时间 ==========
-    st.caption(f"最后更新: {datetime.now().strftime('%H:%M:%S')}")
+    st.markdown(f"""
+    <div style="
+        text-align: center;
+        padding: 10px;
+        background: rgba(0, 200, 81, 0.1);
+        border-radius: 8px;
+        border: 1px solid rgba(0, 200, 81, 0.3);
+        margin-top: 20px;
+    ">
+        <span style="color: #00C851;">🔄 自动刷新中</span> |
+        最后更新: {datetime.now().strftime('%H:%M:%S')} |
+        刷新间隔: 5 秒
+    </div>
+    """, unsafe_allow_html=True)
 
 
 if __name__ == "__main__":

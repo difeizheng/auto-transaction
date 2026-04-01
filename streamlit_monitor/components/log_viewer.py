@@ -18,13 +18,14 @@ def get_level_style(level: str) -> tuple:
     return styles.get(level, ('⚪', '#888888', 'rgba(136, 136, 136, 0.1)'))
 
 
-def render_log_viewer(logs: List[Dict], max_height: int = 400):
+def render_log_viewer(logs: List[Dict], max_height: int = 400, auto_scroll: bool = True):
     """
     渲染日志查看器（使用 HTML 组件）
 
     Args:
         logs: 日志列表
         max_height: 最大高度（像素）
+        auto_scroll: 是否自动滚动到底部
     """
     if not logs:
         st.info("暂无日志")
@@ -79,7 +80,7 @@ def render_log_viewer(logs: List[Dict], max_height: int = 400):
         </style>
     </head>
     <body>
-        <div style="
+        <div id="logContainer" style="
             background: #1a1a2e;
             border-radius: 8px;
             padding: 10px;
@@ -90,6 +91,14 @@ def render_log_viewer(logs: List[Dict], max_height: int = 400):
         ">
             {''.join(log_html_lines)}
         </div>
+        <script>
+        window.onload = function() {{
+            var container = document.getElementById('logContainer');
+            if (container && {str(auto_scroll).lower()}) {{
+                container.scrollTop = container.scrollHeight;
+            }}
+        }};
+        </script>
     </body>
     </html>
     """
@@ -149,7 +158,7 @@ def render_log_filter(logs: List[Dict], key: str = "log_filter"):
         return
 
     # 筛选选项
-    col1, col2 = st.columns([1, 2])
+    col1, col2, col3 = st.columns([1, 2, 1])
 
     with col1:
         level_filter = st.selectbox(
@@ -163,6 +172,14 @@ def render_log_filter(logs: List[Dict], key: str = "log_filter"):
             "搜索关键词",
             placeholder="输入关键词过滤...",
             key=f"{key}_search"
+        )
+
+    with col3:
+        auto_scroll = st.checkbox(
+            "自动滚动",
+            value=True,
+            key=f"{key}_auto_scroll",
+            help="开启后，每次刷新自动显示最新日志"
         )
 
     # 应用筛选
@@ -185,7 +202,10 @@ def render_log_filter(logs: List[Dict], key: str = "log_filter"):
     st.caption(f"显示 {len(filtered_logs)} 条日志")
 
     # 显示日志
-    render_log_viewer(filtered_logs[-50:] if len(filtered_logs) > 50 else filtered_logs)
+    render_log_viewer(
+        filtered_logs[-50:] if len(filtered_logs) > 50 else filtered_logs,
+        auto_scroll=auto_scroll
+    )
 
 
 def render_simple_log_viewer(logs: List[Dict], title: str = "实时日志", lines: int = 20):

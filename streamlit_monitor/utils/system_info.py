@@ -76,13 +76,33 @@ class SystemInfo:
         """查找纸交易进程"""
         processes = self.get_python_processes()
 
-        # 尝试通过日志文件找到进程
+        # 1. 通过进程命令行直接查找
+        try:
+            import subprocess
+            result = subprocess.run(
+                ['wmic', 'process', 'where', "name='python.exe'", 'get', 'ProcessId,CommandLine'],
+                capture_output=True, text=True, encoding='utf-8', errors='ignore'
+            )
+            for line in result.stdout.strip().split('\n'):
+                if 'run_paper_trading' in line:
+                    parts = line.strip().split()
+                    if len(parts) >= 2:
+                        # 找到纸交易进程
+                        pid = parts[0]
+                        return {
+                            'status': 'running',
+                            'log_file': 'trader.log',
+                            'pid': int(pid) if pid.isdigit() else None,
+                            'last_update': datetime.now().strftime('%H:%M:%S'),
+                        }
+        except:
+            pass
+
+        # 2. 尝试通过日志文件找到进程
         latest_log = self.get_latest_paper_trading_log()
         if latest_log:
-            # 检查日志文件是否正在被写入
             stat = latest_log.stat()
             now = datetime.now().timestamp()
-            # 如果日志在最近 60 秒内有更新，说明进程正在运行
             if now - stat.st_mtime < 60:
                 return {
                     'status': 'running',
@@ -90,10 +110,23 @@ class SystemInfo:
                     'last_update': datetime.fromtimestamp(stat.st_mtime).strftime('%H:%M:%S'),
                 }
 
-        # 通过进程命令行查找
-        for proc in processes:
-            # 这里可以添加更多检测逻辑
-            pass
+        # 3. 检查 trader.log (当前运行的日志输出位置)
+        trader_log = LOG_DIR / "trader.log"
+        if trader_log.exists():
+            stat = trader_log.stat()
+            now = datetime.now().timestamp()
+            if now - stat.st_mtime < 60:
+                # 检查日志内容是否包含运行中标志
+                try:
+                    content = trader_log.read_text(encoding='utf-8', errors='ignore')
+                    if '模拟盘监控启动' in content or '信号调度器已启动' in content:
+                        return {
+                            'status': 'running',
+                            'log_file': str(trader_log),
+                            'last_update': datetime.fromtimestamp(stat.st_mtime).strftime('%H:%M:%S'),
+                        }
+                except:
+                    pass
 
         return None
 

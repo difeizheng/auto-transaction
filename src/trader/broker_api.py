@@ -82,10 +82,22 @@ class PaperBroker(BaseBroker):
             self.order_manager = OrderManager(account_name="paper_trading")
             self.risk_controller = RiskController()
 
-            # 如果账户没有资金，初始化
-            if self.order_manager.account.available_cash <= 0:
-                self.order_manager.account.available_cash = self.initial_capital
-                self.order_manager.account.total_asset = self.initial_capital
+            # 始终同步初始资金设置（确保与传入参数一致）
+            # 如果账户资金与预期不符，且无持仓，则重置为指定初始资金
+            if self.order_manager.account.available_cash != self.initial_capital:
+                position_count = len(self.order_manager.get_all_positions())
+                if position_count == 0:
+                    # 无持仓时，重置为指定初始资金
+                    self.order_manager.account.available_cash = self.initial_capital
+                    self.order_manager.account.total_asset = self.initial_capital
+                    self.order_manager._save_account()
+                    trader_logger.info(f"账户资金已重置为：{self.initial_capital}")
+                else:
+                    # 有持仓时，记录警告但不改（避免干扰实际交易）
+                    trader_logger.warning(
+                        f"账户资金 ({self.order_manager.account.available_cash}) 与预期 ({self.initial_capital}) 不符，"
+                        f"因存在 {position_count} 个持仓，不进行重置"
+                    )
 
             self.connected = True
             trader_logger.info(f"模拟券商连接成功，初始资金：{self.initial_capital}")

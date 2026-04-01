@@ -54,7 +54,7 @@ class DataFetcher:
 
         # 检查最新净值记录
         latest_nav = self.query("""
-            SELECT nav, date FROM nav_history
+            SELECT nav, date FROM daily_nav
             ORDER BY date DESC LIMIT 1
         """)
 
@@ -80,7 +80,7 @@ class DataFetcher:
         # 这里需要从 order_manager 的数据库获取
         # 暂时使用净值表
         latest_nav = self.query("""
-            SELECT nav, date FROM nav_history
+            SELECT nav, date FROM daily_nav
             ORDER BY date DESC LIMIT 1
         """)
 
@@ -273,7 +273,7 @@ class DataFetcher:
         start_date = (datetime.now() - timedelta(days=days)).strftime('%Y%m%d')
 
         return self.query("""
-            SELECT * FROM nav_history
+            SELECT * FROM daily_nav
             WHERE date >= ?
             ORDER BY date ASC
         """, (start_date,))
